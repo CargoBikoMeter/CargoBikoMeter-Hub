@@ -6,7 +6,7 @@
 
 
 // UPDATE WITH YOUR DEVICE TTN SECRETS
-// device: adlerkiez_iot_demo01
+// device: cargobikometer-esp32-demoboard-abp
 #ifdef USE_OTAA
 static PROGMEM u1_t DEVEUI[8]  = { 0xE5, 0xEC, 0x29, 0x91, 0x8E, 0x62, 0x9A, 0x00 }; // Device EUI, hex, lsb
 static PROGMEM u1_t APPEUI[8]  = { 0xB9, 0x69, 0x02, 0xD0, 0x7E, 0xD5, 0xB3, 0x70 }; // Application EUI, hex, lsb

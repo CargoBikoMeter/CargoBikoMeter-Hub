@@ -12,19 +12,42 @@
 #include "cbm_demoboard.h"
 
 #define _MEASURE_INTERVAL 2          // how often we read the frequency in seconds
+#define _MOVEMENT_TIMEOUT 60        // seconds
 
 #if OLED==1
 //
 U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/ 16);
 #endif
 
-int debug = 1; // set DEBUGGING ON or OFF
-int debug2 = 0; // return fix frequency value for simulation
+char version[9] = "20200419";
+
+bool debug = false; // set DEBUGGING ON or OFF
+bool debug2 = false; // set DEBUGGING Level 2 ON or OFF
+bool debug3 = false; // return fix frequency value for simulation
+
+// deep sleep definitions
+#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
+#define TIME_TO_SLEEP  600        /* sleep time (in seconds) */
+
+RTC_DATA_ATTR int bootCount = 0;
+
+// define variables for movement checking
+uint32_t noMovementTime = 0;
+
+// Schedule TX every this many seconds (might become longer due to duty
+// cycle limitations).
+const unsigned TX_INTERVAL = 180;
+//const unsigned TX_INTERVAL = 60;
+//const unsigned TX_INTERVAL = 3600;
 
 // Pin definitions
-int buttonPin = 13;         //
-const byte measurePin = 25; // dynamo pulse
+const byte measurePin = 2; // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
+const byte resetPin = 12; // reset DistanceTotal
 
+// define, if OLED display should be on or off
+bool display = true;
+
+// frequency definitions
 int freq_fixed = 14;
 float frequency = 0;
 
@@ -56,6 +79,9 @@ float travelling_time_total = 0; // total travelling time
 float current_speed = 0; // current speed
 float average_speed = 0; //
 
+const byte VPin = 36; // voltage measure pin
+uint16_t voltage = 0;
+
 // EEPROM address for saving distance
 int address = 0;
 
@@ -68,10 +94,6 @@ void os_getDevKey (u1_t* buf) { }
 
 static osjob_t sendjob;
 
-// Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
-const unsigned TX_INTERVAL = 180;
-
 // Pin mapping
 const lmic_pinmap lmic_pins = {
   .nss = 18,
@@ -82,19 +104,22 @@ const lmic_pinmap lmic_pins = {
 
 
 void do_send(osjob_t* j) {
-  Serial.println(F("DEBUG: do_send function entry ..."));
-
+  if ( debug ) {
+    Serial.println(F("DEBUG: do_send function entry ..."));
+  }
   // Check if there is not a current TX/RX job running
   if (LMIC.opmode & OP_TXRXPEND) {
     Serial.println(F("OP_TXRXPEND, not sending"));
   } else {
     // Prepare upstream data transmission at the next possible time.
-    byte payload[2];
+    byte payload[4];
     payload[0] = highByte(distance_total_lora);
     payload[1] = lowByte(distance_total_lora);
+    payload[2] = highByte(voltage);
+    payload[3] = lowByte(voltage);
     LMIC_setTxData2(1, payload, sizeof(payload), 0);
     //LMIC_setTxData2(1, distance_total_lora, sizeof(mydata) - 1, 0);
-    Serial.println(F("Packet queued"));
+    Serial.println(F("INFO: do_send: Packet queued"));
     digitalWrite(BUILTIN_LED, HIGH);
   }
   // Next TX is scheduled after TX_COMPLETE event.
@@ -139,9 +164,18 @@ void onEvent (ev_t ev) {
     case EV_TXCOMPLETE:
       Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
       digitalWrite(BUILTIN_LED, LOW);
+      Serial.print("LMIC.dataLen(EV_TXCOMPLETE): ");
+      Serial.println(LMIC.dataLen);
+
       if (LMIC.txrxFlags & TXRX_ACK)
         Serial.println(F("Received ack"));
       if (LMIC.dataLen) {
+    	 // data received in rx slot after tx
+    	 Serial.print("Data Received: ");
+    	 Serial.write(LMIC.frame+LMIC.dataBeg, LMIC.dataLen);
+    	 Serial.println();
+    	 while(1) {
+    	 }
         Serial.println(F("Received "));
         Serial.println(LMIC.dataLen);
         Serial.println(F(" bytes of payload"));
@@ -178,12 +212,12 @@ int getFrequency() {
   // disable interrupt during measure
   noInterrupts();
   // measure HIGH and LOW
-  if ( debug == 1 ) {
+  if ( debug ) {
     Serial.println("DEBUG: call pulseIn functions on measurePin:" + String(measurePin) );
   }
   Htime = pulseIn(measurePin, HIGH, PULSE_TIMEOUT);   //read high time
   Ltime = pulseIn(measurePin, LOW,  PULSE_TIMEOUT);    //read low time
-  if ( debug == 1 ) {
+  if ( debug ) {
     Serial.println("DEBUG: after pulseIn functions" );
     Serial.println("DEBUG: Htime: " + String(Htime) );
     Serial.println("DEBUG: Ltime: " + String(Ltime) );
@@ -193,14 +227,14 @@ int getFrequency() {
 
   Ttime = Htime + Ltime;
   if ( Ttime > 0 ) {
-    if ( debug == 1 ) {
+    if ( debug ) {
       Serial.println("DEBUG: Ttime = " + String(Ttime) );
     }
     freq = 1000000 / Ttime; //getting frequency with Ttime is in micro seconds
   }
   // display frequency
 
-  if ( debug2 == 1 ) {
+  if ( debug3 ) {
     return (freq_fixed);
   } else {
     return (freq);
@@ -234,7 +268,7 @@ void getDistance() {
   // convert distance_total_km into integer with
   distance_total_lora = (int)distance_total_km;
 
-  if ( debug == 1 )
+  if ( debug )
   {
     Serial.print("DEBUG: measurement_interval in seconds = ");
     Serial.println(_MEASURE_INTERVAL);
@@ -252,68 +286,75 @@ void getDistance() {
   }
 }
 
-void showDistance() {
-  // show on OLED
-  //u8x8.clearLine(3);
-  //u8x8.clearLine(4);
-  //u8x8.clearLine(5);
-  u8x8.setCursor(0, 3);
-  u8x8.print(" Hz: ");
-  u8x8.setCursor(7, 3);
-  u8x8.print(frequency, 1);
-  u8x8.setCursor(0, 4);
-  u8x8.print(" km/h:");
-  u8x8.setCursor(7, 4);
-  u8x8.print(current_speed, 1);
-  u8x8.setCursor(0, 5);
-  u8x8.print(" km:");
-  u8x8.setCursor(7, 5);
-  u8x8.print(distance_total_km);
+void showDisplay() {
+  if (display) {
+	  // show on OLED
+	  u8x8.setCursor(0, 2);
+	  u8x8.print(" Size: ");
+	  u8x8.print(wheel_size, 1);
+	  u8x8.setCursor(0, 3);
+	  u8x8.print(" Hz: ");
+	  u8x8.setCursor(7, 3);
+	  u8x8.print(frequency, 1);
+	  u8x8.setCursor(0, 4);
+	  u8x8.print(" km/h:");
+	  u8x8.setCursor(7, 4);
+	  u8x8.print(current_speed, 1);
+	  u8x8.setCursor(0, 5);
+	  u8x8.print(" km:");
+	  u8x8.setCursor(7, 5);
+	  u8x8.print(distance_total_km);
+	  u8x8.setCursor(0, 6);
+	  u8x8.print(" mV:");
+	  u8x8.setCursor(7, 6);
+	  u8x8.print(voltage);
+  } else {
+  	u8x8.clear();
+  }
 }
 
 
-void initDisplay(void)
-{
-  u8x8.setFont(u8x8_font_amstrad_cpc_extended_f);
-  u8x8.clear();
-  u8x8.inverse();
-  u8x8.print(" Cargobikometer");
-  u8x8.setFont(u8x8_font_chroma48medium8_r);
-  u8x8.noInverse();
-  u8x8.setCursor(0, 1);
-  u8x8.print(" 2020-02-18 180s");
-  u8x8.setCursor(0, 3);
-  u8x8.print(" Hz:");
-  u8x8.setCursor(0, 4);
-  u8x8.print(" km/h:");
-  u8x8.setCursor(0, 5);
-  u8x8.print(" km: ");
+void initDisplay(void) {
+  if (display) {
+	  u8x8.setFont(u8x8_font_amstrad_cpc_extended_f);
+	  u8x8.clear();
+	  u8x8.inverse();
+	  u8x8.print(" Cargobikometer");
+	  u8x8.setFont(u8x8_font_chroma48medium8_r);
+	  u8x8.noInverse();
+	  u8x8.setCursor(0, 1);
+	  u8x8.drawString(1,1,version);
+	  u8x8.setCursor(10, 1);
+	  u8x8.print(TX_INTERVAL/60);
+  } else {
+  	u8x8.clear();
+  }
 }
 
 void initEEPROM() {
-	Serial.println("\nInit EEPROM storage\n");
+	Serial.println("Init EEPROM storage");
 	  if (!EEPROM.begin(1000)) {
-	    Serial.println("Failed to initialize EEPROM");
-	    Serial.println("Restarting...");
+	    Serial.println("  Failed to initialize EEPROM");
+	    Serial.println("  Restarting...");
 	    delay(1000);
 	    ESP.restart();
 	  }
 
 	  // write 1 m to EEPROM for the first time
+	  // TODO: implement first time initialization for fresh ESP32 modules
 	  distance_total=EEPROM.readUInt(address);
-	  Serial.print("DEBUG: first read distance_total from EEPROM in meter = ");
+	  Serial.print("  first read distance_total from EEPROM in meter = ");
 	  Serial.println(distance_total);
 	  if ( distance_total == 0 ) {
-	    Serial.println("DEBUG: write 1 to EEPROM for test ");
+	    Serial.println("  write initial distance_total value=1 to EEPROM");
 	    EEPROM.writeUInt(address, 1);            // 2^32 - 1
 	    EEPROM.commit();
 	  }
 
 	  // read the saved distance from EEPROM
 	  distance_total=EEPROM.readUInt(address);
-	  Serial.print("DEBUG: second read distance_total from EEPROM in meter = ");
+	  Serial.print("  second read distance_total from EEPROM in meter = ");
 	  Serial.println(distance_total);
-
 }
 
 void initLoRa() {
@@ -367,12 +408,12 @@ void measure() {
   uint32_t currentSeconds;
 
   currentSeconds = (uint32_t) millis() / 1000;
-  if ( debug == 2 ) {
-    Serial.print("DEBUG: currentSeconds: ");
+  if ( debug2 ) {
+    Serial.print("DEBUG2: currentSeconds: ");
     Serial.println(currentSeconds);
-    Serial.print("DEBUG: measuretime: ");
+    Serial.print("DEBUG2: measuretime: ");
     Serial.println(measuretime);
-    Serial.print("DEBUG: _MEASURE_INTERVAL: ");
+    Serial.print("DEBUG2: _MEASURE_INTERVAL: ");
     Serial.println(_MEASURE_INTERVAL);
   }
 
@@ -380,30 +421,150 @@ void measure() {
 
     // get the dynamo frequency
     frequency = getFrequency();
-    if ( debug == 1 ) {
-      Serial.print("DEBUG: Frequency: ");
+    if ( debug2 ) {
+      Serial.print("DEBUG2: Frequency: ");
       Serial.println(frequency);
     }
 
     getDistance();
-    showDistance();
     measuretime = currentSeconds;
+  }
+}
+
+void check_battery() {
+	//voltage = (float)analogRead(36) / 4096 * 3.3;
+	// next line use a voltage divider 100k/100k
+	voltage = (int)analogRead(36)*2;
+	if ( debug2 ) {
+	  Serial.println("DEBUG2: Battery Voltage: " + String(voltage) + " V");
+	}
+}
+
+void checkResetPin() {
+	if (digitalRead(resetPin)){
+	  Serial.println("INFO: resetting distance_daily ... ");
+	  Serial.println("INFO: distance_total ... ");
+	  distance_daily = 0;
+	  distance_total = 0;
+	  // clear the line on display
+	  u8x8.clearLine(5);
+	}
+}
+
+/*
+Method to print the reason by which ESP32
+has been awaken from sleep
+*/
+void print_wakeup_reason(){
+  esp_sleep_wakeup_cause_t wakeup_reason;
+
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch(wakeup_reason)
+  {
+    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
+    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
+    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
+  }
+}
+
+void checkMovement() {
+  uint32_t currentSeconds;
+
+  // check, if there any movement based on frequency variable
+  // if not go into sleep mode after some minutes
+  if ( frequency == 0 ) {
+	  currentSeconds = (uint32_t) millis() / 1000;
+	  if ( debug2 ) {
+		Serial.print("DEBUG2: currentSeconds: ");
+		Serial.println(currentSeconds);
+		Serial.print("DEBUG2: noMovementTime: ");
+		Serial.println(noMovementTime);
+		Serial.print("DEBUG2: _MOVEMENT_TIMEOUT: ");
+		Serial.println(_MOVEMENT_TIMEOUT);
+	  }
+	  if ((currentSeconds - noMovementTime) >= _MOVEMENT_TIMEOUT) {
+		  Serial.print("INFO: no movement since: ");
+		  Serial.println(_MOVEMENT_TIMEOUT);
+		  Serial.println("INFO: going into deep sleep mode in 5 seconds, by by ...");
+		  Serial.println("INFO: wakeup with GPIO2 or after sleeptime: " + String(TIME_TO_SLEEP) + " seconds");
+#if OLED==1
+		  // show on OLED
+		  u8x8.clear();
+		  u8x8.setCursor(0, 3);
+		  u8x8.print("No dynamo signal");
+		  u8x8.setCursor(0, 4);
+		  u8x8.print("ENTER DEEP SLEEP");
+		  u8x8.setCursor(0, 5);
+		  u8x8.print("in 5 seconds");
+#endif
+		  delay(5000);
+
+		noMovementTime = currentSeconds;
+	    // goto deep sleep now
+	    esp_deep_sleep_start();
+	  }
   }
 }
 
 // ##################   main program ##############################
 
-void setup()
-{
-  Serial.begin(115200);  //INTIALISING THE SERIAL COMMUNICATION
-  pinMode(measurePin, INPUT);
+void setup() {
+  Serial.begin(115200);  //INTIALIZING THE SERIAL COMMUNICATION
+  delay(1000); //Take some time to open up the Serial Monitor
+
+  // print startup message to console
+  Serial.println("#####################################");
+  Serial.println("    Cargobikometer is starting ...   ");
+  Serial.println("#####################################");
+
+	//Increment boot number and print it every reboot
+	++bootCount;
+	Serial.println("Boot number: " + String(bootCount));
+
+	//Print the wakeup reason for ESP32
+	print_wakeup_reason();
+
+	//Configure GPIO39 as ext0 wake up source for HIGH logic level
+	//esp_sleep_enable_ext0_wakeup(GPIO_NUM_39,1);
+
+	//Configure GPIO2 (frequency input pin) as ext0 wake up source for LOW logic level
+	// because with no external signal pin2 bound to photo-coupler is high
+	esp_sleep_enable_ext0_wakeup(GPIO_NUM_2,0);
+
+	/*
+	First we configure the wake up source
+	We set our ESP32 to wake up after some seconds
+	*/
+	esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+	Serial.println("Setup ESP32 to sleep for " + String(TIME_TO_SLEEP) +
+	" Seconds");
+
+
+  pinMode(measurePin, INPUT); // changed from INPUT to INPUT_PULLUP
+
+  // define voltage measure ADC pin
+  pinMode(36, INPUT);
+
+  // define pin for resetting distance_total to 1
+  pinMode(12, INPUT);
+
+  // init EEPROM (read distance_total and convert to distance_tota_lora before LoRa init sends value)
+  initEEPROM();
+
+  // get values before LoRa initializes and sent these values
+  getDistance();
+  check_battery();
+  Serial.println("SETUP: distance_total_lora: " + String(distance_total_lora) + " km" );
+  Serial.println("SETUP: current battery voltage: " + String(voltage) + " mV");
 
   // initialize OLED display
   u8x8.begin();
   initDisplay();
-
-  // init EEPROM
-  initEEPROM();
+  showDisplay();
 
   // initialize LoRa
   initLoRa();
@@ -414,5 +575,9 @@ void setup()
 void loop() {
   os_runloop_once();
   measure();
-
+  check_battery();
+  checkResetPin();
+  showDisplay();
+  checkMovement();
 }
+
