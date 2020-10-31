@@ -1,6 +1,6 @@
 counts the distance traveled with a cargobike based on hub dynamo frequency and sends it via LoRaWAN to remote server
 
-![alt text](https://github.com/CargoBikoMeter/CargoBikoMeter-Hub/blob/master/CargoBikoMeter-Demonstrator-medium-size.jpg)
+![alt text](https://github.com/CargoBikoMeter/CargoBikoMeter-Hub/blob/master/images/CargoBikoMeter-Demonstrator-medium-size.jpg)
 
 The CargoBikoMeter demonstrator, a joint project with the Sustainable Accessible Innovations Laboratory (SAI-Lab) of TU-Berlin (https://www.chemie.tu-berlin.de/sai_lab/projekte/laufende_projekte/cargobikometer/) in the field of cargobike technologies, demonstrates the basic principle of counting the traveled distance of a cargobike. 
 
