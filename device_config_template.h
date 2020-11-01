@@ -1,9 +1,7 @@
 #pragma once
 
-
 // uncomment to use OTAA instead of ABP
 //#define USE_OTAA
-
 
 // UPDATE WITH YOUR DEVICE TTN SECRETS
 // device: <name of the device in TTN console>

@@ -16,11 +16,8 @@
 
 #include "device_config.h"
 
-
 // if OLED Display is connected to i2c
 #define OLED 1                // Make define 1 on line if you have an OLED display connected
-
-
 
 #include <U8x8lib.h>
 #ifdef U8X8_HAVE_HW_SPI
@@ -33,10 +30,7 @@
 
 //end of add your includes here
 
-
 //add your function definitions for the project adlerkiez_iot_demo01 here
-
-
 
 //Do not add code below this line
 #endif /* _cbm_demoboard_H_ */
