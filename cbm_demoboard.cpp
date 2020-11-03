@@ -14,13 +14,11 @@
 #define _MEASURE_INTERVAL 5          // how often we start the measure
 #define _MOVEMENT_TIMEOUT 60        // seconds
 
-#if OLED==1
-//
-U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/ 16);
-#endif
+// define the current development timestamp
+char version[9] = "20201102";
 
-char version[9] = "20201101";
-
+// define different debug level for the application
+// this levels could be set directly on the device via HIGH level at specific pins
 bool debug = false; // set DEBUGGING ON or OFF
 bool debug2 = false; // set DEBUGGING Level 2 ON or OFF
 bool debug3 = false; // return fix frequency value for simulation
@@ -29,6 +27,7 @@ bool debug3 = false; // return fix frequency value for simulation
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP  600        /* sleep time (in seconds) */
 
+// we count the boot cycles after powering up the device
 RTC_DATA_ATTR int BootCount = 0;
 
 // define variables for movement checking
@@ -39,13 +38,9 @@ uint32_t noMovementTime = 0;
 const unsigned TX_INTERVAL = 180;
 //const unsigned TX_INTERVAL = 60;
 //const unsigned TX_INTERVAL = 3600;
-RTC_DATA_ATTR int TxCount = 0;
 
-// Pin definitions
-const byte PulseMeasurePin = 2; // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
-const byte VoltageMeasurePin = 36; // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
-const byte ResetPin = 12; // reset DistanceTotal with HIGH-Signal on pin
-const byte DebugPin = 13; // set DEBUG level to one if HIGH
+// we count the TX cycles after powering up the device
+RTC_DATA_ATTR int TxCount = 0;
 
 // define, if OLED display should be on or off
 bool display = true;
@@ -64,26 +59,23 @@ unsigned long Ttime;   // total time of a cycle
 unsigned long period;
 const uint32_t PULSE_TIMEOUT = 1000000; // one second 1000000
 
-unsigned long measurement_start = 0; // // time in millis
-unsigned long measurement_interval = 0; // // time in millis
+unsigned long measurement_start = 0;    // time in millis
+unsigned long measurement_interval = 0; // time in millis
 
-const uint16_t wheel_size = 2268; // in mm - Tandem Schwalbe Marathon Mondial: 47x622 - 2268 mm
-const uint8_t dynamo_pulse = 14; // defines the hub dynamo pulse per revolution (Shimano 14)
-// 14 Hz = 1 revolution per second = 2,268 m/s * 3.6 = 8.16 km/h
+const uint16_t wheel_size = 2268;       // in mm - Tandem Schwalbe Marathon Mondial: 47x622 - 2268 mm
+const uint8_t dynamo_pulse = 14;        // defines the hub dynamo pulse per revolution (Shimano 14)
+                                        // 14 Hz = 1 revolution per second = 2,268 m/s * 3.6 = 8.16 km/h
 
-float distance_during_measurement = 0; // counts the traveled distance during measurement interval in meter
-float distance_daily = 0; // counts distance every day
-float distance_daily_km = 0;
-float distance_total = 0; // counts the overall distance
-float distance_total_km = 0;
-uint16_t distance_total_lora = 0; // fixed value for test only
-float travelling_time_of_day = 0; // time of travelling for the day
-float travelling_time_total = 0; // total travelling time
-float current_speed = 0; // current speed
-float average_speed = 0; //
-
-const byte VPin = 36; // voltage measure pin
-uint16_t voltage = 0;
+float distance_during_measurement = 0;  // counts the traveled distance during measurement interval in meter
+float distance_daily = 0;               // counts distance every day
+float distance_daily_km = 0;            //
+float distance_total = 0;               // counts the overall distance and will be save in EEPROM
+float distance_total_km = 0;            // will be finally sent to remote system
+uint16_t distance_total_lora = 0;       // fixed value for test only
+float travelling_time_of_day = 0;       // time of travelling for the day
+float travelling_time_total = 0;        // total travelling time
+float current_speed = 0;                // current speed
+uint16_t voltage = 0;                   // will be finally sent to remote system
 
 // EEPROM address for saving distance
 int address = 0;
@@ -302,76 +294,9 @@ void getDistance() {
   }
 }
 
+#if OLED==1
+// show on OLED display
 void showDisplay() {
-  if (display) {
-	  // show on OLED
-	  u8x8.clearLine(3);
-	  u8x8.setCursor(0, 3);
-	  u8x8.print(" Hz: ");
-	  u8x8.setCursor(7, 3);
-	  u8x8.print(frequency, 1);
-	  u8x8.clearLine(4);
-	  u8x8.setCursor(0, 4);
-	  u8x8.print(" km/h:");
-	  u8x8.setCursor(7, 4);
-	  u8x8.print(current_speed, 1);
-	  u8x8.clearLine(5);
-	  u8x8.setCursor(0, 5);
-	  u8x8.print(" km:");
-	  u8x8.setCursor(7, 5);
-	  u8x8.print(distance_total_km);
-	  u8x8.clearLine(6);
-	  u8x8.setCursor(0, 6);
-	  u8x8.print(" mV:");
-	  u8x8.setCursor(7, 6);
-	  u8x8.print(voltage);
-	  u8x8.setCursor(0, 7);
-	  u8x8.print(" B:");
-	  u8x8.setCursor(3, 7);
-	  u8x8.print(BootCount);
-	  u8x8.setCursor(7, 7);
-	  u8x8.print("T:");
-	  u8x8.setCursor(9, 8);
-	  u8x8.print(TxCount);
-  } else {
-  	u8x8.clear();
-  }
-}
-
-void measure() {
-  uint32_t currentSeconds;
-
-  currentSeconds = (uint32_t) millis() / 1000;
-  if ( debug2 ) {
-    Serial.print("DEBUG2: currentSeconds: ");
-    Serial.println(currentSeconds);
-    Serial.print("DEBUG2: measuretime: ");
-    Serial.println(measuretime);
-    Serial.print("DEBUG2: _MEASURE_INTERVAL: ");
-    Serial.println(_MEASURE_INTERVAL);
-  }
-
-  if ((currentSeconds - measuretime) >= _MEASURE_INTERVAL) {  // Wake up every xx seconds
-
-    // get the dynamo frequency
-	//frequency = getFreq();
-    frequency = getFrequency();
-    if ( debug2 ) {
-      Serial.print("DEBUG2: Frequency: ");
-      Serial.println(frequency);
-    }
-
-    // now calculate the distance moved during the measure interval
-    getDistance();
-
-    measuretime = currentSeconds;
-
-    // show the measured values on display
-    showDisplay();
-  }
-}
-
-void initDisplay(void) {
   if (display) {
 	  u8x8.setFont(u8x8_font_amstrad_cpc_extended_f);
 	  u8x8.clear();
@@ -420,9 +345,44 @@ void initDisplay(void) {
   	u8x8.clear();
   }
 }
+#endif
+
+void measure() {
+  uint32_t currentSeconds;
+
+  currentSeconds = (uint32_t) millis() / 1000;
+  if ( debug2 ) {
+    Serial.print("DEBUG2: currentSeconds: ");
+    Serial.println(currentSeconds);
+    Serial.print("DEBUG2: measuretime: ");
+    Serial.println(measuretime);
+    Serial.print("DEBUG2: _MEASURE_INTERVAL: ");
+    Serial.println(_MEASURE_INTERVAL);
+  }
+
+  if ((currentSeconds - measuretime) >= _MEASURE_INTERVAL) {  // Wake up every xx seconds
+
+    // get the dynamo frequency
+	//frequency = getFreq();
+    frequency = getFrequency();
+    if ( debug2 ) {
+      Serial.print("DEBUG2: Frequency: ");
+      Serial.println(frequency);
+    }
+
+    // now calculate the distance moved during the measure interval
+    getDistance();
+
+    measuretime = currentSeconds;
+
+    // show the measured values on display
+    showDisplay();
+
+  }
+}
 
 void initEEPROM() {
-	Serial.println("Init EEPROM storage");
+	Serial.println("Initialize EEPROM storage");
 	  if (!EEPROM.begin(1000)) {
 	    Serial.println("  Failed to initialize EEPROM");
 	    Serial.println("  Restarting...");
@@ -449,9 +409,9 @@ void initEEPROM() {
 
 void initLoRa() {
   yield();
-  Serial.println(F("Init LoRa modem ..."));
+  Serial.println(F("Initialize LoRa modem ..."));
   SPI.begin(5, 19, 27);
-  // LMIC init
+  // LMIC initialization
   os_init();
   // Reset the MAC state. Session and pending data transfers will be discarded.
   LMIC_reset();
@@ -497,7 +457,7 @@ void initLoRa() {
 void check_battery() {
 	//voltage = (float)analogRead(36) / 4096 * 3.3;
 	// next line use a voltage divider 100k/100k
-	voltage = (int)analogRead(36)*2;
+	voltage = (int)analogRead(VoltageMeasurePin)*2;
 	if ( debug2 ) {
 	  Serial.println("DEBUG2: Battery Voltage: " + String(voltage) + " V");
 	}
@@ -570,16 +530,16 @@ void checkMovement() {
 		  Serial.println(_MOVEMENT_TIMEOUT);
 		  Serial.println("INFO: going into deep sleep mode in 5 seconds, by by ...");
 		  Serial.println("INFO: wakeup with GPIO2 or after sleeptime: " + String(TIME_TO_SLEEP) + " seconds");
-#if OLED==1
-		  // show on OLED
-		  u8x8.clear();
-		  u8x8.setCursor(0, 3);
-		  u8x8.print("No dynamo signal");
-		  u8x8.setCursor(0, 4);
-		  u8x8.print("ENTER DEEP SLEEP");
-		  u8x8.setCursor(0, 5);
-		  u8x8.print("in 5 seconds");
-#endif
+		  if (display) {
+			  // show on OLED
+			  u8x8.clear();
+			  u8x8.setCursor(0, 3);
+			  u8x8.print("No dynamo signal");
+			  u8x8.setCursor(0, 4);
+			  u8x8.print("ENTER DEEP SLEEP");
+			  u8x8.setCursor(0, 5);
+			  u8x8.print("in 5 seconds");
+		  }
 		  delay(5000);
 
 		noMovementTime = currentSeconds;
@@ -648,16 +608,15 @@ void setup() {
 	check_battery();
 	Serial.println("INFO: current battery voltage: " + String(voltage) + " mV");
 
+#if OLED==1
 	// initialize OLED display
 	u8x8.begin();
-	initDisplay();
 	showDisplay();
+#endif
 
 	// initialize LoRa
 	initLoRa();
-
 }
-
 
 void loop() {
 	os_runloop_once();
