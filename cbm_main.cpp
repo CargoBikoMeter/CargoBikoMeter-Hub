@@ -9,13 +9,13 @@
 // https://github.com/matthijskooijman
 
 // Do not remove the include below
-#include "cbm_demoboard.h"
+#include "cbm_main.h"
 
 #define _MEASURE_INTERVAL 5          // how often we start the measure
 #define _MOVEMENT_TIMEOUT 60        // seconds
 
 // define the current development timestamp
-char version[9] = "20201102";
+char version[9] = "20201103";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -30,19 +30,20 @@ bool debug3 = false; // return fix frequency value for simulation
 // we count the boot cycles after powering up the device
 RTC_DATA_ATTR int BootCount = 0;
 
+// we count the TX cycles after powering up the device
+RTC_DATA_ATTR int TxCount = 0;
+
+// EEPROM address for saving distance
+int address = 0;
+
 // define variables for movement checking
 uint32_t noMovementTime = 0;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
 const unsigned TX_INTERVAL = 180;
-//const unsigned TX_INTERVAL = 60;
-//const unsigned TX_INTERVAL = 3600;
 
-// we count the TX cycles after powering up the device
-RTC_DATA_ATTR int TxCount = 0;
-
-// define, if OLED display should be on or off
+// define, if display should be on or off
 bool display = true;
 
 // frequency definitions
@@ -76,9 +77,6 @@ float travelling_time_of_day = 0;       // time of travelling for the day
 float travelling_time_total = 0;        // total travelling time
 float current_speed = 0;                // current speed
 uint16_t voltage = 0;                   // will be finally sent to remote system
-
-// EEPROM address for saving distance
-int address = 0;
 
 // These callbacks are only used in over-the-air activation, so they are
 // left empty here (we cannot leave them out completely unless

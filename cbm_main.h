@@ -4,8 +4,8 @@
 // - extern variable definitions
 // In the appropriate section
 
-#ifndef _cbm_demoboard_H_
-#define _cbm_demoboard_H_
+#ifndef _cbm_main_H_
+#define _cbm_main_H_
 #include "Arduino.h"
 //add your includes for the project here
 #include <lmic.h>
@@ -23,4 +23,4 @@
 //add your function definitions for the project adlerkiez_iot_demo01 here
 
 //Do not add code below this line
-#endif /* _cbm_demoboard_H_ */
+#endif /* _cbm_main_H_ */
