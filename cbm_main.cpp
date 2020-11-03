@@ -11,7 +11,7 @@
 // Do not remove the include below
 #include "cbm_main.h"
 
-#define _MEASURE_INTERVAL 5          // how often we start the measure
+#define _MEASURE_INTERVAL 2          // how often we start the measure
 #define _MOVEMENT_TIMEOUT 60        // seconds
 
 // define the current development timestamp
@@ -19,9 +19,8 @@ char version[9] = "20201103";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
-bool debug = false; // set DEBUGGING ON or OFF
-bool debug2 = false; // set DEBUGGING Level 2 ON or OFF
-bool debug3 = false; // return fix frequency value for simulation
+int debug = 1; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
+
 
 // deep sleep definitions
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
@@ -37,7 +36,8 @@ RTC_DATA_ATTR int TxCount = 0;
 int address = 0;
 
 // define variables for movement checking
-uint32_t noMovementTime = 0;
+// defines the timestamp for last detected movement
+uint32_t LastMovementTime = 0;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
@@ -99,7 +99,7 @@ const lmic_pinmap lmic_pins = {
 // ========== sub functions ===========
 //
 void do_send(osjob_t* j) {
-  if ( debug ) {
+  if ( debug >= 0) {
     Serial.println(F("DEBUG: do_send function entry ..."));
   }
   // Check if there is not a current TX/RX job running
@@ -202,13 +202,14 @@ void onEvent (ev_t ev) {
   }
 }
 
-int getFrequency() {
-  float freq = 0;
+void getFrequency() {
+  //float freq = 0;
   // use pulseIn function
 
-  if ( debug ) {
+  if ( debug >= 0 ) {
     Serial.println("DEBUG: call pulseIn functions on PulseMeasurePin:" + String(PulseMeasurePin) );
   }
+
   // disable interrupt during measure
   noInterrupts();
   // measure HIGH and LOW
@@ -217,27 +218,30 @@ int getFrequency() {
   //enable interrupts again
   interrupts();
 
-  if ( debug ) {
+  if ( debug >= 0 ) {
     Serial.println("DEBUG: after pulseIn functions" );
     Serial.println("DEBUG: Htime: " + String(Htime) );
     Serial.println("DEBUG: Ltime: " + String(Ltime) );
   }
 
-  Ttime = Htime + Ltime;
+  Ttime=0;
+  if ( (Htime > (Htime + Ltime)/3) and (Ltime > (Htime + Ltime)/3) ) {
+    Ttime = Htime + Ltime;
+  }
+
+  if ( debug >= 0 ) {
+    Serial.println("DEBUG: Ttime: " + String(Ttime) );
+  }
 
   if ( Ttime > 0 ) {
-    if ( debug ) {
-      Serial.println("DEBUG: Ttime = " + String(Ttime) );
-    }
-    freq = 1000000 / Ttime; //getting frequency with Ttime is in micro seconds
-  }
-  // display frequency
-
-  if ( debug3 ) {
-    return (freq_fixed);
+    frequency = 1000000 / Ttime; //getting frequency with Ttime in micro seconds
   } else {
-    return (freq);
+	frequency = 0; // set to zero if no further movement
   }
+
+  // return frequency
+  //return (freq);
+
 }
 
 void convertDistance() {
@@ -271,7 +275,7 @@ void getDistance() {
 
 	  convertDistance();
 
-	  if ( debug )
+	  if ( debug >= 0 )
 	  {
 		Serial.print("DEBUG: measurement_interval in seconds = ");
 		Serial.println(_MEASURE_INTERVAL);
@@ -330,7 +334,7 @@ void showDisplay() {
 	  u8x8.setCursor(0, 6);
 	  u8x8.print(" mV:");
 	  u8x8.setCursor(7, 6);
-	  u8x8.print(voltage);
+	  u8x8.print(String(voltage));
 	  u8x8.setCursor(0, 7);
 	  u8x8.print(" B:");
 	  u8x8.setCursor(3, 7);
@@ -345,16 +349,92 @@ void showDisplay() {
 }
 #endif
 
+void check_battery() {
+	//voltage = (float)analogRead(36) / 4096 * 3.3;
+	// next line use a voltage divider 100k/100k
+	voltage = (int)analogRead(VoltageMeasurePin)*2;
+	if ( debug >= 0 ) {
+	  Serial.println("DEBUG: Battery voltage: " + String(voltage) + " V");
+	}
+}
+
+void checkResetPin() {
+	Serial.println("INFO: checking ResetPin ...");
+	if (digitalRead(ResetPin)){
+	  Serial.println("INFO: setting distance_daily to zero ");
+	  Serial.println("INFO: setting distance_total to zero ");
+	  distance_daily = 0;
+	  distance_total = 0;
+	  distance_total_km = 0;
+	  // save the current distance to EEPROM
+	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
+	  EEPROM.commit();
+	  // clear the line on display
+	  u8x8.clearLine(5);
+	}
+}
+
+void checkDebugPins() {
+	Serial.println("INFO: checking DebugPin ...");
+	if (digitalRead(DebugPin)){
+	  Serial.println("INFO: DEBUG level 1 enabled");
+      debug = 1;
+	} else {
+    	Serial.println("INFO: DEBUG level 1 disabled");
+    	debug = 0;
+	}
+}
+
+void checkMovement() {
+  uint32_t currentSeconds;
+
+  // check, if there any movement based on Htime and Ltime variables
+  // if not go into sleep mode when the last movement timestamp is far away
+  if ( Htime + Ltime == 0) {
+	  currentSeconds = (uint32_t) millis() / 1000;
+	  if ( debug >= 0 ) {
+		Serial.print("DEBUG2: currentSeconds: ");
+		Serial.println(currentSeconds);
+		Serial.print("DEBUG2: LastMovementTime: ");
+		Serial.println(LastMovementTime);
+		Serial.print("DEBUG2: _MOVEMENT_TIMEOUT: ");
+		Serial.println(_MOVEMENT_TIMEOUT);
+	  }
+	  if ( (currentSeconds - LastMovementTime) >= _MOVEMENT_TIMEOUT ) {
+		  Serial.print("INFO: no movement since: ");
+		  Serial.println(_MOVEMENT_TIMEOUT);
+		  Serial.println("INFO: going into deep sleep mode in 5 seconds, by by ...");
+		  Serial.println("INFO: wakeup with GPIO2 or after sleeptime: " + String(TIME_TO_SLEEP) + " seconds");
+		  if (display) {
+			  // show on OLED
+			  u8x8.clear();
+			  u8x8.setCursor(0, 3);
+			  u8x8.print("No dynamo signal");
+			  u8x8.setCursor(0, 4);
+			  u8x8.print("ENTER DEEP SLEEP");
+			  u8x8.setCursor(0, 5);
+			  u8x8.print("in 5 seconds");
+		  }
+		  delay(5000);
+	      // goto deep sleep now
+	      esp_deep_sleep_start();
+	  }
+  } else {
+	  // set timestamp for last detected movement
+	  LastMovementTime = (uint32_t) millis() / 1000;
+  }
+}
+
 void measure() {
   uint32_t currentSeconds;
 
   currentSeconds = (uint32_t) millis() / 1000;
-  if ( debug2 ) {
-    Serial.print("DEBUG2: currentSeconds: ");
+  if ( debug >= 1 ) {
+    Serial.print("DEBUG1: currentSeconds: ");
     Serial.println(currentSeconds);
-    Serial.print("DEBUG2: measuretime: ");
+    Serial.print("DEBUG1: measuretime: ");
     Serial.println(measuretime);
-    Serial.print("DEBUG2: _MEASURE_INTERVAL: ");
+    Serial.print("DEBUG1: _MEASURE_INTERVAL: ");
     Serial.println(_MEASURE_INTERVAL);
   }
 
@@ -362,9 +442,10 @@ void measure() {
 
     // get the dynamo frequency
 	//frequency = getFreq();
-    frequency = getFrequency();
-    if ( debug2 ) {
-      Serial.print("DEBUG2: Frequency: ");
+    //frequency = getFrequency();
+	getFrequency();
+    if ( debug >= 0 ) {
+      Serial.print("DEBUG: Frequency: ");
       Serial.println(frequency);
     }
 
@@ -372,6 +453,10 @@ void measure() {
     getDistance();
 
     measuretime = currentSeconds;
+
+	// check some environments
+	check_battery();
+	checkMovement();
 
     // show the measured values on display
     showDisplay();
@@ -452,41 +537,7 @@ void initLoRa() {
   digitalWrite(BUILTIN_LED, LOW);
 }
 
-void check_battery() {
-	//voltage = (float)analogRead(36) / 4096 * 3.3;
-	// next line use a voltage divider 100k/100k
-	voltage = (int)analogRead(VoltageMeasurePin)*2;
-	if ( debug2 ) {
-	  Serial.println("DEBUG2: Battery Voltage: " + String(voltage) + " V");
-	}
-}
 
-void checkResetPin() {
-	Serial.println("INFO: checking ResetPin ...");
-	if (digitalRead(ResetPin)){
-	  Serial.println("INFO: setting distance_daily to zero ");
-	  Serial.println("INFO: setting distance_total to zero ");
-	  distance_daily = 0;
-	  distance_total = 0;
-	  distance_total_km = 0;
-	  // save the current distance to EEPROM
-	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
-	  EEPROM.commit();
-	  // clear the line on display
-	  u8x8.clearLine(5);
-	}
-}
-
-void checkDebugPins() {
-	Serial.println("INFO: checking DebugPin ...");
-	if (digitalRead(DebugPin)){
-	  Serial.println("INFO: DEBUG level 1 enabled");
-      debug = true;
-	} else {
-    	Serial.println("INFO: DEBUG level 1 disabled");
-    	debug = false;
-	}
-}
 
 /*
 Method to print the reason by which ESP32
@@ -508,44 +559,6 @@ void print_wakeup_reason(){
   }
 }
 
-void checkMovement() {
-  uint32_t currentSeconds;
-
-  // check, if there any movement based on frequency variable
-  // if not go into sleep mode after some minutes
-  if ( frequency == 0 ) {
-	  currentSeconds = (uint32_t) millis() / 1000;
-	  if ( debug2 ) {
-		Serial.print("DEBUG2: currentSeconds: ");
-		Serial.println(currentSeconds);
-		Serial.print("DEBUG2: noMovementTime: ");
-		Serial.println(noMovementTime);
-		Serial.print("DEBUG2: _MOVEMENT_TIMEOUT: ");
-		Serial.println(_MOVEMENT_TIMEOUT);
-	  }
-	  if ((currentSeconds - noMovementTime) >= _MOVEMENT_TIMEOUT) {
-		  Serial.print("INFO: no movement since: ");
-		  Serial.println(_MOVEMENT_TIMEOUT);
-		  Serial.println("INFO: going into deep sleep mode in 5 seconds, by by ...");
-		  Serial.println("INFO: wakeup with GPIO2 or after sleeptime: " + String(TIME_TO_SLEEP) + " seconds");
-		  if (display) {
-			  // show on OLED
-			  u8x8.clear();
-			  u8x8.setCursor(0, 3);
-			  u8x8.print("No dynamo signal");
-			  u8x8.setCursor(0, 4);
-			  u8x8.print("ENTER DEEP SLEEP");
-			  u8x8.setCursor(0, 5);
-			  u8x8.print("in 5 seconds");
-		  }
-		  delay(5000);
-
-		noMovementTime = currentSeconds;
-	    // goto deep sleep now
-	    esp_deep_sleep_start();
-	  }
-  }
-}
 
 //
 // ##################   main program ##############################
@@ -601,9 +614,10 @@ void setup() {
 	// initialize EEPROM (read distance_total and convert to distance_tota_lora before LoRa init sends value)
 	initEEPROM();
 	convertDistance();
-	Serial.println("INFO: distance_total_lora: " + String(distance_total_lora) + " km" );
-
 	check_battery();
+
+
+	Serial.println("INFO: distance_total_lora: " + String(distance_total_lora) + " km" );
 	Serial.println("INFO: current battery voltage: " + String(voltage) + " mV");
 
 #if OLED==1
@@ -619,7 +633,5 @@ void setup() {
 void loop() {
 	os_runloop_once();
 	measure();
-	check_battery();
-	checkMovement();
 }
 

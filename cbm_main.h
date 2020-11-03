@@ -17,10 +17,15 @@
 #include "device_config.h"
 
 
+// defines if debug messages should be sent via USB serial line
+// 0: no serial debug messages
+// 1: normal user level debug messages
+// 2: send also interrupt messages (should be avoided)
+#define DUSB 1
 
 //end of add your includes here
 
-//add your function definitions for the project adlerkiez_iot_demo01 here
+//add your function definitions
 
 //Do not add code below this line
 #endif /* _cbm_main_H_ */
