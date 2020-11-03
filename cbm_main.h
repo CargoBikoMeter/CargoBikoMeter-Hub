@@ -14,6 +14,8 @@
 #include <EEPROM.h>
 #include "esp_sleep.h"
 
+// include the device specific config which is linked
+// in the filesystem to device_config.h
 #include "device_config.h"
 
 
@@ -22,6 +24,9 @@
 // 1: normal user level debug messages
 // 2: send also interrupt messages (should be avoided)
 #define DUSB 1
+
+// Serial Port speed
+#define _BAUDRATE 115200					// Works for debug messages to serial momitor
 
 //end of add your includes here
 

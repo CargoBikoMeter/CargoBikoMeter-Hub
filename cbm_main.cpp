@@ -1,5 +1,5 @@
 //
-// Cargobikometer Demonstrator
+// Cargobikometer
 //
 // by: Roland Rutz
 //
@@ -41,7 +41,7 @@ uint32_t LastMovementTime = 0;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
-const unsigned TX_INTERVAL = 180;
+const unsigned TX_INTERVAL = 60;
 
 // define, if display should be on or off
 bool display = true;
@@ -78,6 +78,9 @@ float travelling_time_total = 0;        // total travelling time
 float current_speed = 0;                // current speed
 uint16_t voltage = 0;                   // will be finally sent to remote system
 
+// define the payload buffer for TTN
+byte payload[10];
+
 // These callbacks are only used in over-the-air activation, so they are
 // left empty here (we cannot leave them out completely unless
 // DISABLE_JOIN is set in config.h, otherwise the linker will complain).
@@ -95,6 +98,16 @@ const lmic_pinmap lmic_pins = {
   .dio = {26, 34, 35},
 };
 
+
+// define location variables for fixed or GPS module based location
+float lat			= _LAT;
+float lon			= _LON;
+int   alt			= _ALT;
+uint32_t LatitudeBinary, LongitudeBinary;
+uint32_t measuretimeGPS = 0;              // last time we measure the frequency
+#define _MEASURE_INTERVAL_GPS 10          // how often we start the measure
+
+
 //
 // ========== sub functions ===========
 //
@@ -107,11 +120,18 @@ void do_send(osjob_t* j) {
     Serial.println(F("OP_TXRXPEND, not sending"));
   } else {
     // Prepare upstream data transmission at the next possible time.
-    byte payload[4];
+
     payload[0] = highByte(distance_total_lora);
     payload[1] = lowByte(distance_total_lora);
     payload[2] = highByte(voltage);
     payload[3] = lowByte(voltage);
+	payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
+	payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
+	payload[6] = LatitudeBinary & 0xFF;
+	payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
+	payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
+	payload[9] = LongitudeBinary & 0xFF;
+
     LMIC_setTxData2(1, payload, sizeof(payload), 0);
     //LMIC_setTxData2(1, distance_total_lora, sizeof(mydata) - 1, 0);
     Serial.println(F("INFO: do_send: Packet queued"));
@@ -560,11 +580,32 @@ void print_wakeup_reason(){
 }
 
 
+void getGPS() {
+	uint32_t currentSeconds;
+
+	currentSeconds = (uint32_t) millis() / 1000;
+	if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {  // Wake up every xx seconds
+      //char t;
+	  LatitudeBinary = (( lat + 90) / 180.0) * 16777215;
+	  LongitudeBinary = (( lon + 180) / 360.0) * 16777215;
+
+	  //sprintf(t, "Lat: %f", lat );
+	  Serial.print("DEBUG: Lat: ");
+	  Serial.println(lat);
+
+	  //sprintf(t, "Lng: %f", lon );
+	  Serial.print("DEBUG: Lon: ");
+	  Serial.println(lon);
+
+	  measuretimeGPS = currentSeconds;
+	}
+}
+
 //
 // ##################   main program ##############################
 //
 void setup() {
-	Serial.begin(115200);  //INTIALIZING THE SERIAL COMMUNICATION
+	Serial.begin(_BAUDRATE);  //INTIALIZING THE SERIAL COMMUNICATION
 	delay(1000); //Take some time to open up the Serial Monitor
 
 	// print startup message to console
@@ -633,5 +674,6 @@ void setup() {
 void loop() {
 	os_runloop_once();
 	measure();
+	getGPS();
 }
 
