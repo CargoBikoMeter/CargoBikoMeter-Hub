@@ -26,7 +26,7 @@
 #define DUSB 1
 
 // Serial Port speed
-#define _BAUDRATE 115200					// Works for debug messages to serial momitor
+#define _BAUDRATE 115200 // works for debug messages to serial monitor
 
 //end of add your includes here
 

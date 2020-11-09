@@ -11,11 +11,11 @@
 // Do not remove the include below
 #include "cbm_main.h"
 
-#define _MEASURE_INTERVAL 2          // how often we start the measure
+#define _MEASURE_INTERVAL 4         // how often we start the measure in seconds
 #define _MOVEMENT_TIMEOUT 60        // seconds
 
 // define the current development timestamp
-char version[9] = "20201103";
+char version[9] = "20201109";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -58,7 +58,7 @@ unsigned long Htime;   // high time
 unsigned long Ltime;   // low time
 unsigned long Ttime;   // total time of a cycle
 unsigned long period;
-const uint32_t PULSE_TIMEOUT = 1000000; // one second 1000000
+const uint32_t PULSE_TIMEOUT = 2000000; // one second 1000000
 
 unsigned long measurement_start = 0;    // time in millis
 unsigned long measurement_interval = 0; // time in millis
@@ -254,7 +254,8 @@ void getFrequency() {
   }
 
   if ( Ttime > 0 ) {
-    frequency = 1000000 / Ttime; //getting frequency with Ttime in micro seconds
+	// we MUST use double for high resolution
+    frequency = 1000000 / (double)Ttime; //getting frequency with Ttime in micro seconds
   } else {
 	frequency = 0; // set to zero if no further movement
   }
