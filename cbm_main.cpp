@@ -15,11 +15,11 @@
 #define _MOVEMENT_TIMEOUT 60        // seconds
 
 // define the current development timestamp
-char version[9] = "20201109";
+char version[9] = "20201114";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
-int debug = 1; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
+int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
 
 
 // deep sleep definitions
@@ -62,6 +62,7 @@ const uint32_t PULSE_TIMEOUT = 2000000; // one second 1000000
 
 unsigned long measurement_start = 0;    // time in millis
 unsigned long measurement_interval = 0; // time in millis
+uint32_t currentSeconds;
 
 const uint16_t wheel_size = 2268;       // in mm - Tandem Schwalbe Marathon Mondial: 47x622 - 2268 mm
 const uint8_t dynamo_pulse = 14;        // defines the hub dynamo pulse per revolution (Shimano 14)
@@ -78,8 +79,18 @@ float travelling_time_total = 0;        // total travelling time
 float current_speed = 0;                // current speed
 uint16_t voltage = 0;                   // will be finally sent to remote system
 
-// define the payload buffer for TTN
+// define the payload TX buffer for TTN
 byte payload[10];
+// payload[0] = highByte(distance_total_lora);
+// payload[1] = lowByte(distance_total_lora);
+// payload[2] = highByte(voltage);
+// payload[3] = lowByte(voltage);
+// payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
+// payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
+// payload[6] = LatitudeBinary & 0xFF;
+// payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
+// payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
+// payload[9] = LongitudeBinary & 0xFF;
 
 // These callbacks are only used in over-the-air activation, so they are
 // left empty here (we cannot leave them out completely unless
@@ -112,7 +123,7 @@ uint32_t measuretimeGPS = 0;              // last time we measure the frequency
 // ========== sub functions ===========
 //
 void do_send(osjob_t* j) {
-  if ( debug >= 0) {
+  if ( debug > 0) {
     Serial.println(F("DEBUG: do_send function entry ..."));
   }
   // Check if there is not a current TX/RX job running
@@ -120,17 +131,9 @@ void do_send(osjob_t* j) {
     Serial.println(F("OP_TXRXPEND, not sending"));
   } else {
     // Prepare upstream data transmission at the next possible time.
+	payload[0] = highByte(distance_total_lora);
+	payload[1] = lowByte(distance_total_lora);
 
-    payload[0] = highByte(distance_total_lora);
-    payload[1] = lowByte(distance_total_lora);
-    payload[2] = highByte(voltage);
-    payload[3] = lowByte(voltage);
-	payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
-	payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
-	payload[6] = LatitudeBinary & 0xFF;
-	payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
-	payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
-	payload[9] = LongitudeBinary & 0xFF;
 
     LMIC_setTxData2(1, payload, sizeof(payload), 0);
     //LMIC_setTxData2(1, distance_total_lora, sizeof(mydata) - 1, 0);
@@ -226,7 +229,7 @@ void getFrequency() {
   //float freq = 0;
   // use pulseIn function
 
-  if ( debug >= 0 ) {
+  if ( debug > 0 ) {
     Serial.println("DEBUG: call pulseIn functions on PulseMeasurePin:" + String(PulseMeasurePin) );
   }
 
@@ -238,7 +241,7 @@ void getFrequency() {
   //enable interrupts again
   interrupts();
 
-  if ( debug >= 0 ) {
+  if ( debug > 0 ) {
     Serial.println("DEBUG: after pulseIn functions" );
     Serial.println("DEBUG: Htime: " + String(Htime) );
     Serial.println("DEBUG: Ltime: " + String(Ltime) );
@@ -249,7 +252,7 @@ void getFrequency() {
     Ttime = Htime + Ltime;
   }
 
-  if ( debug >= 0 ) {
+  if ( debug > 0 ) {
     Serial.println("DEBUG: Ttime: " + String(Ttime) );
   }
 
@@ -291,12 +294,14 @@ void getDistance() {
 	  // count the total distance in m
 	  distance_total += distance_during_measurement;
 	  // save the current distance to EEPROM
+	  // reset the address pointer to zero
+	  int address = 0;
 	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
 	  EEPROM.commit();
 
 	  convertDistance();
 
-	  if ( debug >= 0 )
+	  if ( debug > 0 )
 	  {
 		Serial.print("DEBUG: measurement_interval in seconds = ");
 		Serial.println(_MEASURE_INTERVAL);
@@ -324,7 +329,8 @@ void showDisplay() {
 	  u8x8.setFont(u8x8_font_amstrad_cpc_extended_f);
 	  u8x8.clear();
 	  u8x8.inverse();
-	  u8x8.print(" Cargobikometer");
+	  u8x8.print("CBM:");
+	  u8x8.drawString(5,0,device_name);
 	  u8x8.setFont(u8x8_font_chroma48medium8_r);
 	  u8x8.noInverse();
 	  u8x8.setCursor(0, 1);
@@ -374,20 +380,25 @@ void check_battery() {
 	//voltage = (float)analogRead(36) / 4096 * 3.3;
 	// next line use a voltage divider 100k/100k
 	voltage = (int)analogRead(VoltageMeasurePin)*2;
-	if ( debug >= 0 ) {
-	  Serial.println("DEBUG: Battery voltage: " + String(voltage) + " V");
+	if ( debug > 0 ) {
+	  Serial.println("DEBUG: Battery voltage: " + String(voltage) + " mV");
 	}
+	// set the TX payload variables
+    payload[2] = highByte(voltage);
+    payload[3] = lowByte(voltage);
 }
 
 void checkResetPin() {
 	Serial.println("INFO: checking ResetPin ...");
-	if (digitalRead(ResetPin)){
+	if (!digitalRead(ResetPin)){
 	  Serial.println("INFO: setting distance_daily to zero ");
 	  Serial.println("INFO: setting distance_total to zero ");
 	  distance_daily = 0;
 	  distance_total = 0;
 	  distance_total_km = 0;
 	  // save the current distance to EEPROM
+	  // reset the address pointer to zero
+	  int address = 0;
 	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
 	  EEPROM.commit();
 	  // clear the line on display
@@ -397,11 +408,11 @@ void checkResetPin() {
 
 void checkDebugPins() {
 	Serial.println("INFO: checking DebugPin ...");
-	if (digitalRead(DebugPin)){
-	  Serial.println("INFO: DEBUG level 1 enabled");
+	if (!digitalRead(DebugPin)){
+	  Serial.println("INFO: setting DEBUG level to: 1");
       debug = 1;
 	} else {
-    	Serial.println("INFO: DEBUG level 1 disabled");
+    	Serial.println("INFO: setting DEBUG level to: 0");
     	debug = 0;
 	}
 }
@@ -413,7 +424,7 @@ void checkMovement() {
   // if not go into sleep mode when the last movement timestamp is far away
   if ( Htime + Ltime == 0) {
 	  currentSeconds = (uint32_t) millis() / 1000;
-	  if ( debug >= 0 ) {
+	  if ( debug > 0 ) {
 		Serial.print("DEBUG2: currentSeconds: ");
 		Serial.println(currentSeconds);
 		Serial.print("DEBUG2: LastMovementTime: ");
@@ -450,7 +461,7 @@ void measure() {
   uint32_t currentSeconds;
 
   currentSeconds = (uint32_t) millis() / 1000;
-  if ( debug >= 1 ) {
+  if ( debug > 1 ) {
     Serial.print("DEBUG1: currentSeconds: ");
     Serial.println(currentSeconds);
     Serial.print("DEBUG1: measuretime: ");
@@ -465,7 +476,7 @@ void measure() {
 	//frequency = getFreq();
     //frequency = getFrequency();
 	getFrequency();
-    if ( debug >= 0 ) {
+    if ( debug > 0 ) {
       Serial.print("DEBUG: Frequency: ");
       Serial.println(frequency);
     }
@@ -582,24 +593,55 @@ void print_wakeup_reason(){
 
 
 void getGPS() {
-	uint32_t currentSeconds;
 
-	currentSeconds = (uint32_t) millis() / 1000;
-	if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {  // Wake up every xx seconds
       //char t;
-	  LatitudeBinary = (( lat + 90) / 180.0) * 16777215;
-	  LongitudeBinary = (( lon + 180) / 360.0) * 16777215;
+	  LatitudeBinary = ((lat + 90) / 180.0) * 16777215;
+	  LongitudeBinary = ((lon + 180) / 360.0) * 16777215;
 
-	  //sprintf(t, "Lat: %f", lat );
-	  Serial.print("DEBUG: Lat: ");
-	  Serial.println(lat);
+	  // fill the TX buffer
+	  payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
+	  payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
+	  payload[6] = LatitudeBinary & 0xFF;
+	  payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
+	  payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
+	  payload[9] = LongitudeBinary & 0xFF;
 
-	  //sprintf(t, "Lng: %f", lon );
-	  Serial.print("DEBUG: Lon: ");
-	  Serial.println(lon);
+	  if ( debug > 0 ) {
+		  //sprintf(t, "Lat: %f", lat );
+		  Serial.print("DEBUG: Lat: ");
+		  Serial.println(lat,6);
+		  Serial.print("DEBUG: LatitudeBinary:  ");
+		  Serial.print(LatitudeBinary,BIN);
+		  Serial.println();
 
-	  measuretimeGPS = currentSeconds;
-	}
+		  //sprintf(t, "Lng: %f", lon );
+		  Serial.print("DEBUG: Lon: ");
+		  Serial.println(lon,6);
+		  Serial.print("DEBUG: LongitudeBinary: ");
+		  Serial.print(LongitudeBinary,BIN);
+		  Serial.println();
+
+		  Serial.print("DEBUG: payload[4]: ");
+		  Serial.print(payload[4], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[5]: ");
+		  Serial.print(payload[5], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[6]: ");
+		  Serial.print(payload[6], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[7]: ");
+		  Serial.print(payload[7], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[8]: ");
+		  Serial.print(payload[8], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[9]: ");
+		  Serial.print(payload[9], BIN);
+		  Serial.println();
+	  }
+
+
 }
 
 //
@@ -612,6 +654,8 @@ void setup() {
 	// print startup message to console
 	Serial.println("#####################################");
 	Serial.println("    Cargobikometer is starting ...   ");
+	Serial.print("    Device: ");
+	Serial.println(device_name);
 	Serial.println("#####################################");
 
 	// define pin mode for reading dynamo pulse frequency
@@ -620,18 +664,15 @@ void setup() {
 	// define pin mode for voltage measure ADC
 	pinMode(VoltageMeasurePin, INPUT);
 
+	// define pin mode for setting debug mode on
+	pinMode(DebugPin, INPUT_PULLUP);
+
 	// define pin mode for resetting distance_total to 1
-	pinMode(ResetPin, INPUT);
-
-	// check DEBUG level
-	checkDebugPins();
-
-	// check, if EEPROM distance should be set to zero
-	checkResetPin();
+	pinMode(ResetPin, INPUT_PULLUP);
 
 	//Increment boot number and print it every reboot
 	++BootCount;
-	Serial.println("Boot number: " + String(BootCount));
+	Serial.println("INFO-Setup: Boot number: " + String(BootCount));
 
 	//Print the wakeup reason for ESP32
 	print_wakeup_reason();
@@ -648,19 +689,26 @@ void setup() {
 	We set our ESP32 to wake up after some seconds
 	*/
 	esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-	Serial.println("INFO: Setup ESP32 to sleep for " + String(TIME_TO_SLEEP) +
+	Serial.println("INFO-Setup: Prepare ESP32 to sleep for " + String(TIME_TO_SLEEP) +
 	" Seconds");
 
 	// get values before LoRa initializes and sent these values
 
 	// initialize EEPROM (read distance_total and convert to distance_tota_lora before LoRa init sends value)
 	initEEPROM();
+
+	// check DEBUG level
+	checkDebugPins();
+
+	// check, if EEPROM distance should be set to zero
+	checkResetPin();
+
 	convertDistance();
+
 	check_battery();
 
-
-	Serial.println("INFO: distance_total_lora: " + String(distance_total_lora) + " km" );
-	Serial.println("INFO: current battery voltage: " + String(voltage) + " mV");
+	Serial.println("INFO-Setup: distance_total_lora: " + String(distance_total_lora) + " km" );
+	Serial.println("INFO-Setup: current battery voltage: " + String(voltage) + " mV");
 
 #if OLED==1
 	// initialize OLED display
@@ -668,13 +716,26 @@ void setup() {
 	showDisplay();
 #endif
 
+	// get GPS position
+	Serial.println("INFO-Setup: get GPS position ...");
+	getGPS();
+
 	// initialize LoRa
 	initLoRa();
 }
 
 void loop() {
 	os_runloop_once();
+
+	// get the current distance
 	measure();
-	getGPS();
+
+	// get GPS position
+	currentSeconds = (uint32_t) millis() / 1000;
+	if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {
+	  getGPS();
+	  measuretimeGPS = currentSeconds;
+	}
+
 }
 
