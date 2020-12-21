@@ -18,10 +18,15 @@ static PROGMEM u4_t DEVADDR = ; // LoRaWAN end-device address (DevAddr), hex, ms
 #endif
 
 // Pin definitions for Heltec ESP32 LoRaWAN based devices
+// usable pins for input and output: 11, 13, 17, 21, 22, 23
+// usable pins for input only: 33 to 39
+//
 byte PulseMeasurePin = 2;    // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
-byte VoltageMeasurePin = 36; //
+byte VoltageMeasurePin = 36; // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
 byte ResetPin = 12;          // reset DistanceTotal with HIGH-Signal on pin
-byte DebugPin = 13;          // set DEBUG level to one if HIGH
+byte DebugPin = 13;          // set DEBUG level to one if pin is LOW
+byte GpsRxD = 37;            // read data from external GPS module
+byte GpsTxD = 38;            // send data to external GPS module
 
 // if OLED Display is connected to i2c
 #define OLED 1                // Make define 1 on line if you have an OLED display connected

@@ -13,6 +13,8 @@
 #include <WiFi.h>
 #include <EEPROM.h>
 #include "esp_sleep.h"
+#include "HardwareSerial.h"
+#include "TinyGPS++.h"
 
 // include the device specific config which is linked
 // in the filesystem to device_config.h
@@ -27,6 +29,9 @@
 
 // Serial Port speed
 #define _BAUDRATE 115200 // works for debug messages to serial monitor
+
+// Serial Port speed for HardwareSerial
+#define _HWS_BAUDRATE 115200 // works for debug messages to serial monitor
 
 //end of add your includes here
 

@@ -9,17 +9,18 @@
 // https://github.com/matthijskooijman
 
 // Do not remove the include below
+
 #include "cbm_main.h"
 
-#define _MEASURE_INTERVAL 4         // how often we start the measure in seconds
-#define _MOVEMENT_TIMEOUT 60        // seconds
+#define _MEASURE_INTERVAL 4          // how often we start the measure in seconds
+#define _MOVEMENT_TIMEOUT 180        // seconds
 
 // define the current development timestamp
-char version[9] = "20201114";
+char version[9] = "20201221";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
-int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
+int debug = 1; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
 
 
 // deep sleep definitions
@@ -73,24 +74,26 @@ float distance_daily = 0;               // counts distance every day
 float distance_daily_km = 0;            //
 float distance_total = 0;               // counts the overall distance and will be save in EEPROM
 float distance_total_km = 0;            // will be finally sent to remote system
-uint16_t distance_total_lora = 0;       // fixed value for test only
+unsigned long distance_total_lora = 0;  // max distance: 42949672.95 km : 2^32 - 1s
 float travelling_time_of_day = 0;       // time of travelling for the day
 float travelling_time_total = 0;        // total travelling time
 float current_speed = 0;                // current speed
 uint16_t voltage = 0;                   // will be finally sent to remote system
 
 // define the payload TX buffer for TTN
-byte payload[10];
-// payload[0] = highByte(distance_total_lora);
-// payload[1] = lowByte(distance_total_lora);
-// payload[2] = highByte(voltage);
-// payload[3] = lowByte(voltage);
-// payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
-// payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
-// payload[6] = LatitudeBinary & 0xFF;
-// payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
-// payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
-// payload[9] = LongitudeBinary & 0xFF;
+byte payload[12];
+	// payload[0] = distance_total_lora;
+	// payload[1] = distance_total_lora;
+	// payload[2] = distance_total_lora;
+	// payload[3] = distance_total_lora;
+	// payload[4] = highByte(voltage);
+	// payload[5] = lowByte(voltage);
+	// payload[6] = ( LatitudeBinary >> 16 ) & 0xFF;
+	// payload[7] = ( LatitudeBinary >> 8 ) & 0xFF;
+	// payload[8] = LatitudeBinary & 0xFF;
+	// payload[9] = ( LongitudeBinary >> 16 ) & 0xFF;
+	// payload[10] = ( LongitudeBinary >> 8 ) & 0xFF;
+	// payload[11] = LongitudeBinary & 0xFF;
 
 // These callbacks are only used in over-the-air activation, so they are
 // left empty here (we cannot leave them out completely unless
@@ -109,11 +112,19 @@ const lmic_pinmap lmic_pins = {
   .dio = {26, 34, 35},
 };
 
+#if GPS_MODULE==1
+// define GPS based stuff
+TinyGPSPlus gps;
+// because Hardware serial 1 on ESP LoRa points to
+HardwareSerial SerialGPS(2); //
+#endif
 
 // define location variables for fixed or GPS module based location
-float lat			= _LAT;
-float lon			= _LON;
-int   alt			= _ALT;
+bool GPSFix = false;
+double lat = _LAT;
+double lon = _LON;
+int   alt  = _ALT;
+int GPSwarmupTime = 30;                   // GPS warm up time in seconds
 uint32_t LatitudeBinary, LongitudeBinary;
 uint32_t measuretimeGPS = 0;              // last time we measure the frequency
 #define _MEASURE_INTERVAL_GPS 10          // how often we start the measure
@@ -130,9 +141,6 @@ void do_send(osjob_t* j) {
   if (LMIC.opmode & OP_TXRXPEND) {
     Serial.println(F("OP_TXRXPEND, not sending"));
   } else {
-    // Prepare upstream data transmission at the next possible time.
-	payload[0] = highByte(distance_total_lora);
-	payload[1] = lowByte(distance_total_lora);
 
 
     LMIC_setTxData2(1, payload, sizeof(payload), 0);
@@ -248,15 +256,18 @@ void getFrequency() {
   }
 
   Ttime=0;
-  if ( (Htime > (Htime + Ltime)/3) and (Ltime > (Htime + Ltime)/3) ) {
-    Ttime = Htime + Ltime;
-  }
+//  if ( (Htime > (Htime + Ltime)/3) and (Ltime > (Htime + Ltime)/3) ) {
+//    Ttime = Htime + Ltime;
+//  }
+
+  Ttime = Htime + Ltime;
 
   if ( debug > 0 ) {
     Serial.println("DEBUG: Ttime: " + String(Ttime) );
   }
 
-  if ( Ttime > 0 ) {
+  // count only frequencies > 3 Hz eg.g Ttime < 333333
+  if ( Ttime > 0 && Ttime < 333333 ) {
 	// we MUST use double for high resolution
     frequency = 1000000 / (double)Ttime; //getting frequency with Ttime in micro seconds
   } else {
@@ -269,11 +280,38 @@ void getFrequency() {
 }
 
 void convertDistance() {
-	  // convert from meter into km
-	  distance_total_km = distance_total / 1000.0 ;
+  // convert from meter into km
+  distance_total_km = distance_total / 1000.0 ;
 
-	  // convert distance_total_km into integer with
-	  distance_total_lora = (int)distance_total_km;
+  // convert distance_total_km into LoRa suitable value
+  // max distance: 42949672.95 km : 2^32 - 1
+  //   distance_total_lora = 4294967295;
+  distance_total_lora = distance_total_km * 100;
+
+  // Prepare payload data
+  payload[0] = ( distance_total_lora >> 24 ) & 0xFF;
+  payload[1] = ( distance_total_lora >> 16 ) & 0xFF;
+  payload[2] = ( distance_total_lora >>  8 ) & 0xFF;
+  payload[3] =   distance_total_lora & 0xFF;
+
+  if ( debug > 0 ) {
+	Serial.println("");
+	Serial.print("DEBUG: normalized distance_total_lora = ");
+	Serial.println(distance_total_lora);
+	Serial.println("DEBUG: Payload fields:");
+	Serial.print("DEBUG: payload[0]: ");
+	Serial.print(payload[0], BIN);
+	Serial.println();
+	Serial.print("DEBUG: payload[1]: ");
+	Serial.print(payload[1], BIN);
+	Serial.println();
+	Serial.print("DEBUG: payload[2]: ");
+	Serial.print(payload[2], BIN);
+	Serial.println();
+	Serial.print("DEBUG: payload[3]: ");
+	Serial.print(payload[3], BIN);
+	Serial.println();
+  }
 }
 
 void getDistance() {
@@ -303,6 +341,7 @@ void getDistance() {
 
 	  if ( debug > 0 )
 	  {
+		Serial.println("");
 		Serial.print("DEBUG: measurement_interval in seconds = ");
 		Serial.println(_MEASURE_INTERVAL);
 		Serial.print("DEBUG: current_speed in km/h = ");
@@ -313,9 +352,6 @@ void getDistance() {
 		Serial.println(distance_daily);
 		Serial.print("DEBUG: distance_total in m = ");
 		Serial.println(distance_total);
-		Serial.print("DEBUG: distance_total_lora in km = ");
-		Serial.println(distance_total_lora);
-		Serial.println("");
 	  }
   } else {
 	current_speed = 0;
@@ -363,13 +399,17 @@ void showDisplay() {
 	  u8x8.setCursor(7, 6);
 	  u8x8.print(String(voltage));
 	  u8x8.setCursor(0, 7);
-	  u8x8.print(" B:");
-	  u8x8.setCursor(3, 7);
+	  u8x8.print("B:");
+	  u8x8.setCursor(2, 7);
 	  u8x8.print(BootCount);
-	  u8x8.setCursor(7, 7);
+	  u8x8.setCursor(6, 7);
 	  u8x8.print("T:");
-	  u8x8.setCursor(9, 8);
+	  u8x8.setCursor(8, 7);
 	  u8x8.print(TxCount);
+	  u8x8.setCursor(12, 7);
+	  u8x8.print("G:");
+	  u8x8.setCursor(14, 7);
+	  u8x8.print(GPSFix);
   } else {
   	u8x8.clear();
   }
@@ -384,8 +424,8 @@ void check_battery() {
 	  Serial.println("DEBUG: Battery voltage: " + String(voltage) + " mV");
 	}
 	// set the TX payload variables
-    payload[2] = highByte(voltage);
-    payload[3] = lowByte(voltage);
+    payload[4] = highByte(voltage);
+    payload[5] = lowByte(voltage);
 }
 
 void checkResetPin() {
@@ -591,22 +631,43 @@ void print_wakeup_reason(){
   }
 }
 
+#if GPS_MODULE==1
+bool waitforGPS() {
+	Serial.println("INFO: Wait some seconds for GPS warmup: " + String(GPSwarmupTime));
+	for (unsigned int sec =0; sec < GPSwarmupTime; sec++) {
+	  if(gps.encode(SerialGPS.read()) && gps.location.lat() != 0 ) {
+        Serial.println("INFO: got GPS-Fix");
+        GPSFix = true;
+      return true;
+	  }
+	  Serial.print('.');
+	  yield();
+	  delay(1000);
+	}
+	Serial.println("ERROR: Got no GPX-Fix in 180 seconds");
+	GPSFix = false;
+	return false;
+}
+#endif
 
-void getGPS() {
-
-      //char t;
+/*
+ * set the GPS data into LoRa payload array
+ */
+void setGPS() {
+      //char t
 	  LatitudeBinary = ((lat + 90) / 180.0) * 16777215;
 	  LongitudeBinary = ((lon + 180) / 360.0) * 16777215;
 
 	  // fill the TX buffer
-	  payload[4] = ( LatitudeBinary >> 16 ) & 0xFF;
-	  payload[5] = ( LatitudeBinary >> 8 ) & 0xFF;
-	  payload[6] = LatitudeBinary & 0xFF;
-	  payload[7] = ( LongitudeBinary >> 16 ) & 0xFF;
-	  payload[8] = ( LongitudeBinary >> 8 ) & 0xFF;
-	  payload[9] = LongitudeBinary & 0xFF;
+	  payload[6] = ( LatitudeBinary >> 16 ) & 0xFF;
+	  payload[7] = ( LatitudeBinary >> 8 ) & 0xFF;
+	  payload[8] = LatitudeBinary & 0xFF;
+	  payload[9] = ( LongitudeBinary >> 16 ) & 0xFF;
+	  payload[10] = ( LongitudeBinary >> 8 ) & 0xFF;
+	  payload[11] = LongitudeBinary & 0xFF;
 
 	  if ( debug > 0 ) {
+		  Serial.println("DEBUG: GPSFix: " + String(GPSFix));
 		  //sprintf(t, "Lat: %f", lat );
 		  Serial.print("DEBUG: Lat: ");
 		  Serial.println(lat,6);
@@ -621,12 +682,6 @@ void getGPS() {
 		  Serial.print(LongitudeBinary,BIN);
 		  Serial.println();
 
-		  Serial.print("DEBUG: payload[4]: ");
-		  Serial.print(payload[4], BIN);
-		  Serial.println();
-		  Serial.print("DEBUG: payload[5]: ");
-		  Serial.print(payload[5], BIN);
-		  Serial.println();
 		  Serial.print("DEBUG: payload[6]: ");
 		  Serial.print(payload[6], BIN);
 		  Serial.println();
@@ -639,10 +694,47 @@ void getGPS() {
 		  Serial.print("DEBUG: payload[9]: ");
 		  Serial.print(payload[9], BIN);
 		  Serial.println();
+		  Serial.print("DEBUG: payload[10]: ");
+		  Serial.print(payload[10], BIN);
+		  Serial.println();
+		  Serial.print("DEBUG: payload[11]: ");
+		  Serial.print(payload[11], BIN);
+		  Serial.println();
 	  }
-
-
 }
+
+/*
+ * get the GPS data
+ * if no GPS module is attached, then use static defined data
+ */
+void getGPS() {
+	currentSeconds = (uint32_t) millis() / 1000;
+    if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {
+      //Serial.println("DEBUG: getGPS function entered ...");
+      //Serial.print("DEBUG: SerialGPS.available= ");
+      //Serial.print(SerialGPS.available());
+
+#if GPS_MODULE==1
+      while (SerialGPS.available() > 0) {
+    	// Serial.println("INFO: reading GPS data ...");
+    	gps.encode(SerialGPS.read());
+      }
+
+      if(gps.location.lat() != 0 ) {
+        Serial.println("INFO: valid GPS data");
+        GPSFix = true;
+        lat=gps.location.lat();
+        lon=gps.location.lng();
+        //Serial.print("ALT=");  Serial.println(gps.altitude.meters());
+      }
+#endif
+      setGPS();
+	  measuretimeGPS = currentSeconds;
+	}
+}
+
+
+
 
 //
 // ##################   main program ##############################
@@ -704,10 +796,9 @@ void setup() {
 	checkResetPin();
 
 	convertDistance();
+	Serial.println("INFO-Setup: normalized distance_total_lora: " + String(distance_total_lora) );
 
 	check_battery();
-
-	Serial.println("INFO-Setup: distance_total_lora: " + String(distance_total_lora) + " km" );
 	Serial.println("INFO-Setup: current battery voltage: " + String(voltage) + " mV");
 
 #if OLED==1
@@ -716,8 +807,16 @@ void setup() {
 	showDisplay();
 #endif
 
+#if GPS_MODULE==1
 	// get GPS position
-	Serial.println("INFO-Setup: get GPS position ...");
+	// initialize GPS
+	SerialGPS.begin(_HWS_BAUDRATE, SERIAL_8N1, GpsRxD, GpsTxD);
+	Serial.println("INFO-Setup: get first GPS position ...");
+	waitforGPS();
+#endif
+	// set initial GPS data into LoRa payload
+	setGPS();
+	// now get GPS data
 	getGPS();
 
 	// initialize LoRa
@@ -725,17 +824,15 @@ void setup() {
 }
 
 void loop() {
+	// start LoRa
 	os_runloop_once();
 
 	// get the current distance
 	measure();
 
-	// get GPS position
-	currentSeconds = (uint32_t) millis() / 1000;
-	if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {
-	  getGPS();
-	  measuretimeGPS = currentSeconds;
-	}
+	// get GPS position if GPS module is attached
+	// with no attached GPS module use static defined GPS data
+	getGPS();
 
 }
 
