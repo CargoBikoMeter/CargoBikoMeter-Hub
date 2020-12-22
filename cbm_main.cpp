@@ -16,15 +16,15 @@
 #define _MOVEMENT_TIMEOUT 180        // seconds
 
 // define the current development timestamp
-char version[9] = "20201221";
+char version[9] = "20201222";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
-int debug = 1; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
+int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
 
 
 // deep sleep definitions
-#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
+#define uS_TO_S_FACTOR 1000000    /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP  600        /* sleep time (in seconds) */
 
 // we count the boot cycles after powering up the device
