@@ -13,15 +13,14 @@
 #include "cbm_main.h"
 
 #define _MEASURE_INTERVAL 4          // how often we start the measure in seconds
-#define _MOVEMENT_TIMEOUT 180        // seconds
+#define _MOVEMENT_TIMEOUT 180        // seconds to wait for activating deep sleep
 
 // define the current development timestamp
-char version[9] = "20201222";
+char version[9] = "20201230";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
 int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
-
 
 // deep sleep definitions
 #define uS_TO_S_FACTOR 1000000    /* Conversion factor for micro seconds to seconds */
@@ -121,11 +120,13 @@ HardwareSerial SerialGPS(2); //
 
 // define location variables for fixed or GPS module based location
 bool GPSFix = false;
-double lat = _LAT;
-double lon = _LON;
-int   alt  = _ALT;
-int GPSwarmupTime = 30;                   // GPS warm up time in seconds
-uint32_t LatitudeBinary, LongitudeBinary;
+// save the coordinates in RTC memory, default: static coordinate from device_config.h
+RTC_DATA_ATTR double lat = _LAT;
+RTC_DATA_ATTR double lon = _LON;
+RTC_DATA_ATTR int    alt = _ALT;
+
+int GPSwarmupTime = 300;                   // GPS warm up time in seconds
+uint32_t LatitudeBinary,  LongitudeBinary;
 uint32_t measuretimeGPS = 0;              // last time we measure the frequency
 #define _MEASURE_INTERVAL_GPS 10          // how often we start the measure
 
@@ -451,9 +452,6 @@ void checkDebugPins() {
 	if (!digitalRead(DebugPin)){
 	  Serial.println("INFO: setting DEBUG level to: 1");
       debug = 1;
-	} else {
-    	Serial.println("INFO: setting DEBUG level to: 0");
-    	debug = 0;
 	}
 }
 
@@ -560,6 +558,7 @@ void initEEPROM() {
 	  distance_total=EEPROM.readUInt(address);
 	  Serial.print("  second read distance_total from EEPROM in meter = ");
 	  Serial.println(distance_total);
+
 }
 
 void initLoRa() {
@@ -631,30 +630,13 @@ void print_wakeup_reason(){
   }
 }
 
-#if GPS_MODULE==1
-bool waitforGPS() {
-	Serial.println("INFO: Wait some seconds for GPS warmup: " + String(GPSwarmupTime));
-	for (unsigned int sec =0; sec < GPSwarmupTime; sec++) {
-	  if(gps.encode(SerialGPS.read()) && gps.location.lat() != 0 ) {
-        Serial.println("INFO: got GPS-Fix");
-        GPSFix = true;
-      return true;
-	  }
-	  Serial.print('.');
-	  yield();
-	  delay(1000);
-	}
-	Serial.println("ERROR: Got no GPX-Fix in 180 seconds");
-	GPSFix = false;
-	return false;
-}
-#endif
 
 /*
  * set the GPS data into LoRa payload array
  */
 void setGPS() {
-      //char t
+
+	  //char t
 	  LatitudeBinary = ((lat + 90) / 180.0) * 16777215;
 	  LongitudeBinary = ((lon + 180) / 360.0) * 16777215;
 
@@ -708,32 +690,37 @@ void setGPS() {
  * if no GPS module is attached, then use static defined data
  */
 void getGPS() {
+	//Serial.println("DEBUG: getGPS function entered ...");
 	currentSeconds = (uint32_t) millis() / 1000;
     if ((currentSeconds - measuretimeGPS) >= _MEASURE_INTERVAL_GPS) {
-      //Serial.println("DEBUG: getGPS function entered ...");
-      //Serial.print("DEBUG: SerialGPS.available= ");
-      //Serial.print(SerialGPS.available());
 
 #if GPS_MODULE==1
-      while (SerialGPS.available() > 0) {
-    	// Serial.println("INFO: reading GPS data ...");
-    	gps.encode(SerialGPS.read());
-      }
+		for (unsigned long start = millis(); millis() - start < 1000;) {
+			while ( SerialGPS.available() > 0 ) {
+			  gps.encode(SerialGPS.read());
+			}
+		}
+		//Serial.println("DEBUG: measure entered ...");
+		if (gps.location.isValid()) {
+			GPSFix= true;
+			lat=gps.location.lat();
+			lon=gps.location.lng();
+			Serial.println("INFO: got GPSFix");
+			//Serial.print("ALT=");  Serial.println(gps.altitude.meters());
+			Serial.print("INFO: lat: ");
+			Serial.println(lat,6);
+			Serial.print("INFO: lon: ");
+			Serial.println(lon,6);
+		} else {
+			GPSFix = false;
+			Serial.println("INFO: no GPSFix!");
 
-      if(gps.location.lat() != 0 ) {
-        Serial.println("INFO: valid GPS data");
-        GPSFix = true;
-        lat=gps.location.lat();
-        lon=gps.location.lng();
-        //Serial.print("ALT=");  Serial.println(gps.altitude.meters());
-      }
+		}
 #endif
       setGPS();
 	  measuretimeGPS = currentSeconds;
 	}
 }
-
-
 
 
 //
@@ -811,13 +798,18 @@ void setup() {
 	// get GPS position
 	// initialize GPS
 	SerialGPS.begin(_HWS_BAUDRATE, SERIAL_8N1, GpsRxD, GpsTxD);
-	Serial.println("INFO-Setup: get first GPS position ...");
-	waitforGPS();
-#endif
-	// set initial GPS data into LoRa payload
-	setGPS();
-	// now get GPS data
+	// now get GPS data from real sensor
 	getGPS();
+#endif
+	Serial.println("INFO-Setup: get GPS position from RTC memory ...");
+	// print current GPS data from RTC memory
+	Serial.print("INFO: Lat:: ");
+	Serial.println(lat,6);
+	Serial.print("INFO: Lon: ");
+	Serial.println(lon,6);
+
+	// set initial GPS data into LoRa payload, if no GPS is available use static coordinates
+	setGPS();
 
 	// initialize LoRa
 	initLoRa();
