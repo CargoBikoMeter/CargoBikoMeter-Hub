@@ -16,7 +16,7 @@
 #define _MOVEMENT_TIMEOUT 180        // seconds to wait for activating deep sleep
 
 // define the current development timestamp
-char version[9] = "20201230";
+char version[9] = "20210102";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -738,7 +738,7 @@ void setup() {
 	Serial.println("#####################################");
 
 	// define pin mode for reading dynamo pulse frequency
-	pinMode(PulseMeasurePin, INPUT); // changed from INPUT to INPUT_PULLUP
+	pinMode(PulseMeasurePin, INPUT_PULLUP); // changed from INPUT to INPUT_PULLUP
 
 	// define pin mode for voltage measure ADC
 	pinMode(VoltageMeasurePin, INPUT);
