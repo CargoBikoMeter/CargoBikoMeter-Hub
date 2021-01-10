@@ -15,6 +15,8 @@
 #include "esp_sleep.h"
 #include "HardwareSerial.h"
 #include "TinyGPS++.h"
+#include "VoltageMeter.h" // from OpenBikeSensor
+#include "battery.h"      // from OpenBikeSensor
 
 // include the device specific config which is linked
 // in the filesystem to device_config.h
@@ -30,11 +32,14 @@
 // Serial Port speed
 #define _BAUDRATE 115200 // works for debug messages to serial monitor
 
-
+// define DEVELOP for messages during development
+#define DEVELOP
 
 //end of add your includes here
 
 //add your function definitions
+extern VoltageMeter* voltageMeter;
+
 
 //Do not add code below this line
 #endif /* _cbm_main_H_ */

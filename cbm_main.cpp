@@ -13,10 +13,10 @@
 #include "cbm_main.h"
 
 #define _MEASURE_INTERVAL 4          // how often we start the measure in seconds
-#define _MOVEMENT_TIMEOUT 180        // seconds to wait for activating deep sleep
+#define _MOVEMENT_TIMEOUT 60      // seconds to wait for activating deep sleep
 
 // define the current development timestamp
-char version[9] = "20210102";
+char version[9] = "20210110";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -31,9 +31,6 @@ RTC_DATA_ATTR int BootCount = 0;
 
 // we count the TX cycles after powering up the device
 RTC_DATA_ATTR int TxCount = 0;
-
-// EEPROM address for saving distance
-int address = 0;
 
 // define variables for movement checking
 // defines the timestamp for last detected movement
@@ -69,15 +66,17 @@ const uint8_t dynamo_pulse = 14;        // defines the hub dynamo pulse per revo
                                         // 14 Hz = 1 revolution per second = 2,268 m/s * 3.6 = 8.16 km/h
 
 float distance_during_measurement = 0;  // counts the traveled distance during measurement interval in meter
-float distance_daily = 0;               // counts distance every day
-float distance_daily_km = 0;            //
-float distance_total = 0;               // counts the overall distance and will be save in EEPROM
-float distance_total_km = 0;            // will be finally sent to remote system
+//float distance_daily = 0;               // counts distance every day
+// float distance_daily_km = 0;            //
+RTC_DATA_ATTR float distance_total = 0; // counts the overall distance and will be saved in RTC Memory
+//float distance_total_km = 0;            // will be finally sent to remote system
 unsigned long distance_total_lora = 0;  // max distance: 42949672.95 km : 2^32 - 1s
-float travelling_time_of_day = 0;       // time of travelling for the day
-float travelling_time_total = 0;        // total travelling time
+//float travelling_time_of_day = 0;       // time of travelling for the day
+//float travelling_time_total = 0;        // total travelling time
 float current_speed = 0;                // current speed
 uint16_t voltage = 0;                   // will be finally sent to remote system
+VoltageMeter* voltageMeter;             // we use this object for getting battery status
+uint16_t BatteryAlarmLevel = 3100;      // battery alarm level in millivolt
 
 // define the payload TX buffer for TTN
 byte payload[12];
@@ -282,12 +281,12 @@ void getFrequency() {
 
 void convertDistance() {
   // convert from meter into km
-  distance_total_km = distance_total / 1000.0 ;
+  //distance_total_km = distance_total / 1000.0 ;
 
   // convert distance_total_km into LoRa suitable value
   // max distance: 42949672.95 km : 2^32 - 1
   //   distance_total_lora = 4294967295;
-  distance_total_lora = distance_total_km * 100;
+  distance_total_lora = distance_total / 1000.0 * 100;
 
   // Prepare payload data
   payload[0] = ( distance_total_lora >> 24 ) & 0xFF;
@@ -315,6 +314,8 @@ void convertDistance() {
   }
 }
 
+
+
 void getDistance() {
   if (Ttime > 0) {
 	  // speed in m/s wheel_size in mm
@@ -326,17 +327,8 @@ void getDistance() {
 	  // calculate the current speed in km/h
 	  current_speed *= 3.6;
 
-	  // count the total distance in m of the current day
-	  distance_daily += distance_during_measurement;
-	  distance_daily_km = distance_daily / 1000.0 ;
-
 	  // count the total distance in m
 	  distance_total += distance_during_measurement;
-	  // save the current distance to EEPROM
-	  // reset the address pointer to zero
-	  int address = 0;
-	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
-	  EEPROM.commit();
 
 	  convertDistance();
 
@@ -349,8 +341,6 @@ void getDistance() {
 		Serial.println(current_speed);
 		Serial.print("DEBUG: distance_during_measurement in m = ");
 		Serial.println(distance_during_measurement);
-		Serial.print("DEBUG: distance_daily in m = ");
-		Serial.println(distance_daily);
 		Serial.print("DEBUG: distance_total in m = ");
 		Serial.println(distance_total);
 	  }
@@ -393,7 +383,7 @@ void showDisplay() {
 	  u8x8.setCursor(0, 5);
 	  u8x8.print(" km:");
 	  u8x8.setCursor(7, 5);
-	  u8x8.print(distance_total_km);
+	  u8x8.print(distance_total/1000.0);
 	  u8x8.clearLine(6);
 	  u8x8.setCursor(0, 6);
 	  u8x8.print(" mV:");
@@ -418,9 +408,12 @@ void showDisplay() {
 #endif
 
 void check_battery() {
+	voltageMeter = new VoltageMeter; // takes a moment, so do it here
 	//voltage = (float)analogRead(36) / 4096 * 3.3;
 	// next line use a voltage divider 100k/100k
-	voltage = (int)analogRead(VoltageMeasurePin)*2;
+	//voltage = (int)analogRead(VoltageMeasurePin)*2;
+	voltage = (int)(voltageMeter->read() * 1000);
+
 	if ( debug > 0 ) {
 	  Serial.println("DEBUG: Battery voltage: " + String(voltage) + " mV");
 	}
@@ -432,11 +425,9 @@ void check_battery() {
 void checkResetPin() {
 	Serial.println("INFO: checking ResetPin ...");
 	if (!digitalRead(ResetPin)){
-	  Serial.println("INFO: setting distance_daily to zero ");
 	  Serial.println("INFO: setting distance_total to zero ");
-	  distance_daily = 0;
 	  distance_total = 0;
-	  distance_total_km = 0;
+	  //distance_total_km = 0;
 	  // save the current distance to EEPROM
 	  // reset the address pointer to zero
 	  int address = 0;
@@ -453,6 +444,45 @@ void checkDebugPins() {
 	  Serial.println("INFO: setting DEBUG level to: 1");
       debug = 1;
 	}
+}
+
+void initEEPROM() {
+	  Serial.println("Initialize EEPROM storage");
+	  if (!EEPROM.begin(1000)) {
+	    Serial.println("  Failed to initialize EEPROM");
+	    Serial.println("  Restarting...");
+	    delay(1000);
+	    ESP.restart();
+	  }
+
+	  // write 1 m to EEPROM for the first time
+	  // TODO: implement first time initialization for fresh ESP32 modules
+//	  int address = 0;
+//	  distance_total=EEPROM.readUInt(address);
+//	  Serial.print("  first read distance_total from EEPROM in meter = ");
+//	  Serial.println(distance_total);
+//	  if ( distance_total == 0 ) {
+//	    Serial.println("  write initial distance_total value=1 to EEPROM");
+//	    EEPROM.writeUInt(address, 1);            // 2^32 - 1
+//	    EEPROM.commit();
+//	  }
+}
+
+void saveDistance() {
+	  // save the current distance to EEPROM if battery level is very low
+	  // reset the address pointer to zero
+	  initEEPROM();
+	  int address = 0;
+	  EEPROM.writeUInt(address, distance_total);            // 2^32 - 1
+	  EEPROM.commit();
+}
+
+void readEEPROM() {
+	  // read the saved distance from EEPROM
+	  int address = 0;
+	  distance_total=EEPROM.readUInt(address);
+	  Serial.print("INFO: read distance_total from EEPROM in meter = ");
+	  Serial.println(distance_total);
 }
 
 void checkMovement() {
@@ -485,6 +515,17 @@ void checkMovement() {
 			  u8x8.setCursor(0, 5);
 			  u8x8.print("in 5 seconds");
 		  }
+
+		  // if battery level is below alarm level, write current distance into EEPROM
+          if ( voltage < BatteryAlarmLevel) {
+        	Serial.println("WARN: Low battery, saving current distance into EEPROM ...");
+        	saveDistance();
+        	if (display) {
+      	     u8x8.setCursor(0, 7);
+      	     u8x8.print("DISTANCE SAVED");
+        	}
+          }
+
 		  delay(5000);
 	      // goto deep sleep now
 	      esp_deep_sleep_start();
@@ -525,7 +566,10 @@ void measure() {
     measuretime = currentSeconds;
 
 	// check some environments
+    // wait some seconds after startup before battery check
+    delay(3000);
 	check_battery();
+
 	checkMovement();
 
     // show the measured values on display
@@ -534,32 +578,6 @@ void measure() {
   }
 }
 
-void initEEPROM() {
-	Serial.println("Initialize EEPROM storage");
-	  if (!EEPROM.begin(1000)) {
-	    Serial.println("  Failed to initialize EEPROM");
-	    Serial.println("  Restarting...");
-	    delay(1000);
-	    ESP.restart();
-	  }
-
-	  // write 1 m to EEPROM for the first time
-	  // TODO: implement first time initialization for fresh ESP32 modules
-	  distance_total=EEPROM.readUInt(address);
-	  Serial.print("  first read distance_total from EEPROM in meter = ");
-	  Serial.println(distance_total);
-	  if ( distance_total == 0 ) {
-	    Serial.println("  write initial distance_total value=1 to EEPROM");
-	    EEPROM.writeUInt(address, 1);            // 2^32 - 1
-	    EEPROM.commit();
-	  }
-
-	  // read the saved distance from EEPROM
-	  distance_total=EEPROM.readUInt(address);
-	  Serial.print("  second read distance_total from EEPROM in meter = ");
-	  Serial.println(distance_total);
-
-}
 
 void initLoRa() {
   yield();
@@ -771,22 +789,29 @@ void setup() {
 	Serial.println("INFO-Setup: Prepare ESP32 to sleep for " + String(TIME_TO_SLEEP) +
 	" Seconds");
 
-	// get values before LoRa initializes and sent these values
-
-	// initialize EEPROM (read distance_total and convert to distance_tota_lora before LoRa init sends value)
-	initEEPROM();
-
 	// check DEBUG level
 	checkDebugPins();
 
 	// check, if EEPROM distance should be set to zero
 	checkResetPin();
 
-	convertDistance();
-	Serial.println("INFO-Setup: normalized distance_total_lora: " + String(distance_total_lora) );
-
 	check_battery();
 	Serial.println("INFO-Setup: current battery voltage: " + String(voltage) + " mV");
+
+	// get some parameters before LoRa initializes and will be sent this parameters
+
+	// set distance_total to EEPROM value if RTC memory variable distance_total is empty
+	if ( distance_total == 0 ) {
+	  // initialize EEPROM (read distance_total and convert to distance_total_lora before LoRa init sends value)
+	  Serial.println("INFO-Setup: reading distance_total in meter from EEPROM: ");
+	  initEEPROM();
+      readEEPROM();
+	}
+	Serial.println("INFO-Setup: distance_total in meter: " + String(distance_total) );
+
+	// convert distance into LoRaWAN payload values
+	convertDistance();
+	Serial.println("INFO-Setup: distance_total_lora: " + String(distance_total_lora) );
 
 #if OLED==1
 	// initialize OLED display
