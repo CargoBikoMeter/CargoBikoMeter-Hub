@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DEVICE_CONFIG_H
+#define DEVICE_CONFIG_H
 
 // uncomment to use OTAA instead of ABP
 //#define USE_OTAA
@@ -19,14 +20,20 @@ static PROGMEM u4_t DEVADDR = ; // LoRaWAN end-device address (DevAddr), hex, ms
 
 // Pin definitions for Heltec ESP32 LoRaWAN based devices
 // usable pins for input and output: 11, 13, 17, 21, 22, 23
-// usable pins for input only: 33 to 39
+// usable pins for input: 33, 36-39 (but not LoRa DIO pins 34, 35)
 //
-byte PulseMeasurePin = 2;    // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
-byte VoltageMeasurePin = 36; // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
-byte ResetPin = 12;          // reset DistanceTotal with HIGH-Signal on pin
-byte DebugPin = 13;          // set DEBUG level to one if pin is LOW
-byte GpsRxD = 37;            // read data from external GPS module
-byte GpsTxD = 38;            // send data to external GPS module
+#define _PulseMeasurePin  2   // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
+#define _BATTERY_PIN     36   // battery pin to use on device
+#define _ResetPin        12   // reset DistanceTotal with HIGH-Signal on pin
+#define _DebugPin        13   // set DEBUG level to one if pin is LOW
+#define _GpsRxD          37   // read data from external GPS module
+#define _GpsTxD          38   // send data to external GPS module
+
+#define _MEASURE_INTERVAL   4 // how often we start the measure in seconds
+#define _MOVEMENT_TIMEOUT 120 // seconds to wait for activating deep sleep
+
+#define _TX_INTERVAL       60 // how often the data will be send via LoRaWAN
+#define TIME_TO_SLEEP     600 // deep sleep time (in seconds)
 
 // if OLED Display is connected to i2c
 #define OLED 1                // Make define 1 on line if you have an OLED display connected
@@ -50,3 +57,5 @@ U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/
 #define _LAT 52.48389
 #define _LON 13.38856
 #define _ALT 8
+
+#endif

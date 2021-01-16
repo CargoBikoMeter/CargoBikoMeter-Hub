@@ -12,11 +12,8 @@
 
 #include "cbm_main.h"
 
-#define _MEASURE_INTERVAL 4          // how often we start the measure in seconds
-#define _MOVEMENT_TIMEOUT 60      // seconds to wait for activating deep sleep
-
 // define the current development timestamp
-char version[9] = "20210110";
+char version[9] = "20210116";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -24,7 +21,6 @@ int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensiv
 
 // deep sleep definitions
 #define uS_TO_S_FACTOR 1000000    /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  600        /* sleep time (in seconds) */
 
 // we count the boot cycles after powering up the device
 RTC_DATA_ATTR int BootCount = 0;
@@ -37,8 +33,16 @@ RTC_DATA_ATTR int TxCount = 0;
 uint32_t LastMovementTime = 0;
 
 // Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
-const unsigned TX_INTERVAL = 60;
+// cycle limitations)
+uint32_t TX_INTERVAL = _TX_INTERVAL;
+
+// assign device specific pin definitions to global variables
+const uint8_t PulseMeasurePin = _PulseMeasurePin;
+const uint8_t BATTERY_PIN     = _BATTERY_PIN;
+const uint8_t ResetPin        = _ResetPin;
+const uint8_t DebugPin        = _DebugPin;
+const uint8_t GpsRxD          = _GpsRxD;
+const uint8_t GpsTxD          = _GpsTxD;
 
 // define, if display should be on or off
 bool display = true;
@@ -55,14 +59,14 @@ unsigned long Htime;   // high time
 unsigned long Ltime;   // low time
 unsigned long Ttime;   // total time of a cycle
 unsigned long period;
-const uint32_t PULSE_TIMEOUT = 2000000; // one second 1000000
+uint32_t PULSE_TIMEOUT = 2000000; // one second 1000000
 
 unsigned long measurement_start = 0;    // time in millis
 unsigned long measurement_interval = 0; // time in millis
 uint32_t currentSeconds;
 
-const uint16_t wheel_size = 2268;       // in mm - Tandem Schwalbe Marathon Mondial: 47x622 - 2268 mm
-const uint8_t dynamo_pulse = 14;        // defines the hub dynamo pulse per revolution (Shimano 14)
+uint16_t wheel_size = 2268;             // in mm - Tandem Schwalbe Marathon Mondial: 47x622 - 2268 mm
+uint8_t dynamo_pulse = 14;              // defines the hub dynamo pulse per revolution (Shimano 14)
                                         // 14 Hz = 1 revolution per second = 2,268 m/s * 3.6 = 8.16 km/h
 
 float distance_during_measurement = 0;  // counts the traveled distance during measurement interval in meter
@@ -759,7 +763,7 @@ void setup() {
 	pinMode(PulseMeasurePin, INPUT_PULLUP); // changed from INPUT to INPUT_PULLUP
 
 	// define pin mode for voltage measure ADC
-	pinMode(VoltageMeasurePin, INPUT);
+	pinMode(BATTERY_PIN, INPUT);
 
 	// define pin mode for setting debug mode on
 	pinMode(DebugPin, INPUT_PULLUP);
