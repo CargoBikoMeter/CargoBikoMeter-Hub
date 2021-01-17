@@ -13,14 +13,14 @@
 #include "cbm_main.h"
 
 // define the current development timestamp
-char version[9] = "20210116";
+char version[9] = "20210117";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
 int debug = 0; // set debugging level, 0 - no messages, 1 - normal, 2 - extensive
 
 // deep sleep definitions
-#define uS_TO_S_FACTOR 1000000    /* Conversion factor for micro seconds to seconds */
+#define uS_TO_S_FACTOR 1000000.0    /* Conversion factor for micro seconds to seconds */
 
 // we count the boot cycles after powering up the device
 RTC_DATA_ATTR int BootCount = 0;
