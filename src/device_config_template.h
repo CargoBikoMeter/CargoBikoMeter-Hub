@@ -24,16 +24,20 @@ static PROGMEM u4_t DEVADDR = ; // LoRaWAN end-device address (DevAddr), hex, ms
 //
 #define _PulseMeasurePin  2   // dynamo pulse (MUST use PIN 2 (PIN 25 not work with LoRa)
 #define _BATTERY_PIN     36   // battery pin to use on device
-#define _ResetPin        12   // reset DistanceTotal with HIGH-Signal on pin
-#define _DebugPin        13   // set DEBUG level to one if pin is LOW
+#define _ADC_CORRECTION  1.6  // device specific correction factor 
+#define _ButtonPin        0   // USER button: PRG button on device is GPIO0
+#define _TouchPin        12   // touch button T1 on device is on PRG pin 0 
 #define _GpsRxD          37   // read data from external GPS module
 #define _GpsTxD          38   // send data to external GPS module
 
 #define _MEASURE_INTERVAL   4 // how often we start the measure in seconds
-#define _MOVEMENT_TIMEOUT 120 // seconds to wait for activating deep sleep
+#define _MOVEMENT_TIMEOUT 30 // seconds to wait for activating deep sleep (Default 120 seconds)
 
-#define _TX_INTERVAL       60 // how often the data will be send via LoRaWAN
-#define TIME_TO_SLEEP     600 // deep sleep time (in seconds)
+#define _TX_INTERVAL       900 // how often the data will be send via LoRaWAN (seconds)
+#define _TIME_TO_SLEEP    3600 // deep sleep time (seconds)
+
+// Serial Port speed for HardwareSerial
+#define _HWS_BAUDRATE 9600   // speed for hardware serial interface 2
 
 // if OLED Display is connected to i2c
 #define OLED 1                // Make define 1 on line if you have an OLED display connected
@@ -52,10 +56,13 @@ static PROGMEM u4_t DEVADDR = ; // LoRaWAN end-device address (DevAddr), hex, ms
 U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/ 16);
 #endif
 
-// define GPS data
-// example: CityLab Berlin:  _LAT 52.48389  _LON 13.38856
-#define _LAT 52.48389
-#define _LON 13.38856
+// define GPS stuff
+// first enable or disable GPS_MODULE: 1 - GPS module attached,  0 - no GPS module attached
+#define GPS_MODULE 1
+// now define static GPS data, could be redefined later via LoRa command
+// Alte Schule: _LAT 52.43892  _LON 13.54981
+#define _LAT 52.43892
+#define _LON 13.54981
 #define _ALT 8
 
 #endif
