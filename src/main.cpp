@@ -21,7 +21,7 @@ extern void eraseConfigData();
 extern CBMConfig_s CBMConfig;
 
 // define the current development version
-const char *CBMVersion = "1.1.0";
+const char *CBMVersion = "1.1.1";
 
 // define different debug level for the application
 // this levels could be set directly on the device via HIGH level at specific pins
@@ -30,6 +30,7 @@ int debug = 1; // set debugging level, 0 - no messages, 1 - normal, 2 - extensiv
 // assign device specific pin definitions to global variables
 const uint8_t buttonPin       = _ButtonPin;     // USER button button on device
 const int     touchPin        = _TouchPin;      // touch button on device 
+const int     LoRaSendLEDPin = _LoRaSendLEDPin; // LoRa send pin
 const uint8_t PulseMeasurePin = _PulseMeasurePin;
 const uint8_t BATTERY_PIN     = _BATTERY_PIN;
 const uint8_t GpsRxD          = _GpsRxD;
@@ -198,6 +199,18 @@ void VextOFF(void) //Vext default OFF
   digitalWrite(Vext, HIGH);
 }
 
+void flash_LED(void)
+{
+  // set the LoRaSendLEDPin to High
+  digitalWrite(LoRaSendLEDPin, HIGH);
+  delay(500);
+  digitalWrite(LoRaSendLEDPin, LOW);
+  delay(500);
+  digitalWrite(LoRaSendLEDPin, HIGH);
+  delay(500);
+  digitalWrite(LoRaSendLEDPin, LOW);
+}
+
 void initEEPROM() {
 	  Serial.println("Initialize EEPROM storage");
 	  if (!EEPROM.begin(1000)) {
@@ -275,7 +288,8 @@ void onEvent (ev_t ev) {
             break;
         case EV_JOINED:
             Serial.println(F("EV_JOINED"));
-			JOINED= true; // CBM added line
+			      JOINED= true; // CBM added line
+            flash_LED(); // LED flashen
             {
               u4_t netid = 0;
               devaddr_t devaddr = 0;
@@ -332,6 +346,7 @@ void onEvent (ev_t ev) {
             }
             // Schedule next transmission
             os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+            flash_LED();
             break;
         case EV_LOST_TSYNC:
             Serial.println(F("EV_LOST_TSYNC"));
@@ -423,6 +438,7 @@ void getFrequency() {
 
 }
 
+
 void convertDistance() {
   // convert from meter into km
   //distance_total_km = distance_total / 1000.0 ;
@@ -493,6 +509,12 @@ void getDistance() {
   }
 }
 
+void resetDistanceTotal() {
+  // reset the distance_total to 0 
+  distance_total = 0;
+}
+
+
 #if OLED==1
 // functions for OLED display
 
@@ -541,6 +563,20 @@ void showConfigDisplay() {
 	  u8x8.print("<15s: CFG-GUI");
     u8x8.setCursor(1, 5);
 	  u8x8.print(">20s: RESET!");   
+  } else {
+  	u8x8.clear();
+  }
+}
+
+void showConfigRunDisplay() {
+  if (display) {
+    showDisplayHeader();
+	  u8x8.setCursor(1, 3);
+	  u8x8.print("Configuration");
+    u8x8.setCursor(1, 4);
+	  u8x8.print(">5s: RESET km");
+    u8x8.setCursor(1, 5);
+	  u8x8.print("");   
   } else {
   	u8x8.clear();
   }
@@ -657,21 +693,21 @@ void showDisplay() {
 
 // check if user has pressed button or touchPin for configuration menue
 void checkConfigPinsPressed() {
-  Log.info(F("checkConfigPinsPressed"));
+  Log.info(F("checkConfigPinsPressed  value"));
 
   CMD_COUNTER = 0;
   // check if button or touchPin are pressed
   // buttonPin pressed: HIGH -> LOW
+  Log.verbose(F("  TouchRead value: %i"), touchRead(touchPin));  // for DEBUG
   if (  ! digitalRead(buttonPin) || (touchRead(touchPin) < 20) ) {
-  //if ( (touchRead(touchPin) < 20) ) {
     ConfigPinsPressed = 1;
   } else {
     ConfigPinsPressed = 0;
   }
 
   Log.verbose(F("  ConfigPinsPressed state (pressed or touched = 1): %i"), ConfigPinsPressed);
-
-  if ( ConfigPinsPressed == 1 ) { //check if button or touchPin was pressed before and being pressed now
+  
+  if ( ConfigPinsPressed == 1 && ! JOINED) { //check if button or touchPin was pressed before and being pressed now
     // show configuration screen messages
     showConfigDisplay();
     if (ConfigPinsState == 0)
@@ -709,7 +745,6 @@ void checkConfigPinsPressed() {
           // erase configuration data
           Log.info(F("eraseConfigData"));
           eraseConfigData();
-
         }
 
         // increment counter every second
@@ -735,6 +770,63 @@ void checkConfigPinsPressed() {
       ConfigPinsState = 0;
     }
   }
+
+  if ( ConfigPinsPressed == 1 && JOINED && frequency == 0 ) { // RESET distance only, if no movement are detected
+    Log.verbose(F("RESET distance  after 5 seconds ..."));
+    showConfigRunDisplay();
+    if (ConfigPinsState == 0)
+    {
+      ConfigPinsState = 1;
+      Log.verbose(F("  Config button or touchPin pressed"));
+      // now count the seconds the button ore touchPin is pressed
+      while ( ConfigPinsState != 0 )
+      {
+        #if OLED==1
+        u8x8.clearLine(7);
+        u8x8.setCursor(2, 7);
+	      u8x8.print("Seconds:");
+        u8x8.setCursor(11, 8);
+	      u8x8.print(CMD_COUNTER);
+        #endif
+
+        if ( ! digitalRead(buttonPin) || (touchRead(touchPin) < 20) ) {
+          ConfigPinsState = 1;
+        } else {
+          ConfigPinsState = 0;
+        }
+        CMD_COUNTER++;
+        Log.verbose(F(" CMD_COUNTER: %i"), CMD_COUNTER);
+
+        // increment counter every second
+        delay(1000);
+      } // while loop
+
+      if ( CMD_COUNTER  >= 5 ) {
+        #if OLED==1
+        u8x8.clearLine(7);
+        u8x8.setCursor(1, 7);
+        u8x8.print("RESET distance");
+        #endif
+        // wait some seconds for user released button
+        delay(3000);
+        Log.info(F("resetDistanceTotal"));
+        resetDistanceTotal();
+        saveDistance();     // save the distance 0 to EEPROM
+        convertDistance(); // set the LoRa variable to 0
+        showDisplay();
+        delay(3000);
+      }
+
+      CMD_COUNTER = 0;   // reset counter
+      ConfigPinsState = 0;
+    }
+  }
+  else {
+    if (ConfigPinsState == 1) {
+      ConfigPinsState = 0;
+    }
+  }
+  
   Log.verbose(F("checkConfigPinsPressed - end"));
 }
 
@@ -849,6 +941,11 @@ void measure() {
         Serial.print("DEBUG: Frequency: ");
         Serial.println(frequency);
       }
+
+
+    // read the state of the user button or touch pin value now
+    // this enables some functions during main loop
+    checkConfigPinsPressed();
 
     // now calculate the distance moved during the measure interval
     getDistance();
@@ -1047,6 +1144,10 @@ void setup() {
 	// define pin mode for voltage measure ADC
 	pinMode(BATTERY_PIN, INPUT);
 
+  // define pin mode for LoRaSendLEDPin
+	pinMode(LoRaSendLEDPin, OUTPUT);
+  flash_LED();
+  
 	//Increment boot number and print it every reboot
 	++BootCount;
 	Serial.println("INFO-Setup: Boot number: " + String(BootCount));
@@ -1249,6 +1350,8 @@ void loop() {
 	os_runloop_once();
  
   if ( JOINED ) {
+    
+
 	  // get the current distance
 	  measure();
 
