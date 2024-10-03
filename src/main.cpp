@@ -492,7 +492,7 @@ void getDistance() {
 	  // count the total distance in m
 	  distance_total += distance_during_measurement;
 
-	  convertDistance();
+	  //TODO remove this line convertDistance();
   }
   
   if ( debug > 0 ) {
@@ -949,6 +949,8 @@ void measure() {
 
     // now calculate the distance moved during the measure interval
     getDistance();
+    // set the LoRaWAN variable
+    convertDistance();
 
     measuretime = currentSeconds;
 
